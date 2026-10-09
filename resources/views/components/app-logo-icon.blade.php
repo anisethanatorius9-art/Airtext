@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" {{ $attributes }}>
-    <rect x="2" y="2" width="60" height="60" rx="18" fill="#173D35" />
-    <path d="M17 24.5C17 21.4624 19.4624 19 22.5 19H41.5C44.5376 19 47 21.4624 47 24.5V35.5C47 38.5376 44.5376 41 41.5 41H31.5L23 47V41H22.5C19.4624 41 17 38.5376 17 35.5V24.5Z" fill="#D8EF8B" />
-    <path d="M23 29.5C25.6667 27.5 28.3333 27.5 31 29.5C33.6667 31.5 36.3333 31.5 39 29.5" stroke="#173D35" stroke-width="2.5" stroke-linecap="round" />
+    <rect x="2" y="2" width="60" height="60" rx="18" fill="#123B50" />
+    <path d="M13 19.5C13 15.9101 15.9101 13 19.5 13H44.5C48.0899 13 51 15.9101 51 19.5V36.5C51 40.0899 48.0899 43 44.5 43H31L19 52V43H19.5C15.9101 43 13 40.0899 13 36.5V19.5Z" fill="#FFFFFF" />
+    <path d="M21 23H41M21 31H34" stroke="#123B50" stroke-width="3" stroke-linecap="round" />
+    <path d="M36 39L40 35L44 39L49 32" stroke="#FFBE55" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
 </svg>

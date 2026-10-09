@@ -6,7 +6,7 @@
     </div>
     <div class="shop-wallet">
         <span class="shop-wallet-icon"><flux:icon.wallet variant="outline" /></span>
-        <div><small>Available credits</small><strong>{{ number_format($shopBalance) }} SMS</strong></div>
+        <div><small>Wallet</small><strong>Not connected</strong></div>
         <flux:button wire:click="topUpCredits" variant="primary" icon="plus">Top up credits</flux:button>
     </div>
 </header>

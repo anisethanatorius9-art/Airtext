@@ -13,6 +13,7 @@ class SmsPayloadService
         };
     }
 
+    /** @return array{type: 'status'|'receipt'|'message', content: string} */
     public function decode(string $rawPayload): array
     {
         return match (true) {

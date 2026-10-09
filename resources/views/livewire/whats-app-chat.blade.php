@@ -1,5 +1,6 @@
-<div class="whatsapp-app">
+<div class="whatsapp-app {{ $showConversation ? 'show-conversation' : '' }}">
     <aside class="whatsapp-rail">
+        <a href="{{ route('home') }}" class="rail-brand" aria-label="Air app home"><x-app-logo-icon /></a>
         <div class="rail-top">
             <flux:button wire:click="showPanel('chats')" variant="ghost" icon="chat-bubble-left-right" square aria-label="Chats" />
             <flux:button wire:click="showPanel('calls')" variant="ghost" icon="phone" square aria-label="Calls" />
@@ -25,14 +26,16 @@
 
     <aside class="whatsapp-chats">
         @if($leftPanel === 'shop')
-            <div class="shop-context-panel">
-                <div class="shop-context-mark"><flux:icon.building-storefront variant="outline" /></div>
-                <flux:heading size="lg">AirText Shop</flux:heading>
-                <flux:text>Marketplace</flux:text>
-                <div class="shop-context-links"><span class="is-active"><flux:icon.squares-2x2 variant="outline" /> Browse services</span><span><flux:icon.shopping-bag variant="outline" /> Installed items</span><span><flux:icon.wallet variant="outline" /> Wallet & billing</span></div>
-            </div>
+        <div class="shop-context-panel">
+            <div class="shop-context-mark"><flux:icon.building-storefront variant="outline" /></div>
+            <flux:heading size="lg">AirText Shop</flux:heading>
+            <flux:text>Marketplace</flux:text>
+            <div class="shop-context-links"><span class="is-active"><flux:icon.squares-2x2 variant="outline" /> Browse services</span><span><flux:icon.shopping-bag variant="outline" /> Installed items</span><span>
+                    <flux:icon.wallet variant="outline" /> Wallet & billing
+                </span></div>
+        </div>
         @elseif($leftPanel === 'status')
-            @include('livewire.status-sidebar')
+        @include('livewire.status-sidebar')
         @elseif($leftPanel === 'calls')
         <header class="chats-header calls-header">
             <flux:heading size="xl">Calls</flux:heading>
@@ -63,9 +66,9 @@
                             <small>{{ $call['number'] }}</small>
                         </div>
                         <div class="call-meta"><time>{{ $call['time'] }}</time>@if($call['duration'])<small>{{ $call['duration'] }}</small>@endif</div>
-                        <a href="tel:{{ str_replace(' ', '', $call['number']) }}" class="quick-call" aria-label="Call {{ $call['name'] }}">
+                        <button type="button" wire:click="openCallInterface(@js($call['number']), @js($call['name']))" class="quick-call" aria-label="Call {{ $call['name'] }}">
                             <flux:icon.phone />
-                        </a>
+                        </button>
                     </article>
                     @empty
                     <p class="empty-chats">No recent calls found.</p>
@@ -203,6 +206,60 @@
             </section>
         </div>
         @endif
+        @if($showCallScreen)
+        <div class="call-screen-backdrop">
+            <section class="call-screen" role="dialog" aria-modal="true" aria-labelledby="call-screen-name">
+                <header class="call-screen-header">
+                    <flux:button wire:click="closeCallInterface" variant="ghost" icon="arrow-down" square aria-label="Close call screen" />
+                    <span class="call-screen-encryption"><flux:icon.lock-closed /> AirText call</span>
+                    <span class="call-screen-spacer"></span>
+                </header>
+                <div class="call-screen-person">
+                    <flux:avatar initials="{{ collect(preg_split('/\s+/', trim($callName)))->filter()->take(2)->map(fn ($part) => mb_substr($part, 0, 1))->implode('') ?: '?' }}" color="zinc" size="xl" />
+                    <flux:heading id="call-screen-name" size="xl">{{ $callName }}</flux:heading>
+                    <flux:text>{{ $callNumber }}</flux:text>
+                    <span class="call-screen-status">Ready to call</span>
+                </div>
+                <div class="call-screen-controls">
+                    <button type="button" wire:click="toggleCallControl('speaker')" class="call-screen-control {{ $callSpeaker ? 'is-active' : '' }}" aria-pressed="{{ $callSpeaker ? 'true' : 'false' }}">
+                        <span><flux:icon.speaker-wave /></span><small>Speaker</small>
+                    </button>
+                    <button type="button" wire:click="toggleCallControl('video')" class="call-screen-control {{ $callVideo ? 'is-active' : '' }}" aria-pressed="{{ $callVideo ? 'true' : 'false' }}">
+                        <span><flux:icon.video-camera /></span><small>Video</small>
+                    </button>
+                    <button type="button" wire:click="toggleCallControl('mute')" class="call-screen-control {{ $callMuted ? 'is-active' : '' }}" aria-pressed="{{ $callMuted ? 'true' : 'false' }}">
+                        <span>
+                            <flux:icon.microphone />
+                        </span><small>{{ $callMuted ? 'Unmute' : 'Mute' }}</small>
+                    </button>
+                    <button type="button" wire:click="toggleCallControl('more')" class="call-screen-control" aria-expanded="{{ $callMoreOpen ? 'true' : 'false' }}">
+                        <span><flux:icon.ellipsis-horizontal /></span><small>More</small>
+                    </button>
+                    <button type="button" wire:click="shareCallNumber" class="call-screen-control">
+                        <span>
+                            <flux:icon.share />
+                        </span><small>Share</small>
+                    </button>
+                    <button type="button" wire:click="closeCallInterface" class="call-screen-control is-end">
+                        <span>
+                            <flux:icon.phone />
+                        </span><small>End</small>
+                    </button>
+                </div>
+                @if($callMoreOpen)
+                <div class="call-screen-more">
+                    <span>Call options</span>
+                    <flux:button wire:click="shareCallNumber" variant="ghost" icon="share">Share number</flux:button>
+                    <flux:button wire:click="closeCallInterface" variant="ghost" icon="phone">End call</flux:button>
+                </div>
+                @endif
+                <div class="call-screen-actions">
+                    <flux:button wire:click="handoffCall" variant="primary" icon="phone" class="call-screen-start">Call using phone</flux:button>
+                    <flux:text size="sm">Your phone app handles the live call and audio controls.</flux:text>
+                </div>
+            </section>
+        </div>
+        @endif
         @if($showContactForm)
         <section class="contact-form-panel">
             <header class="chats-header">
@@ -251,30 +308,34 @@
 
     <main class="whatsapp-conversation">
         @if($leftPanel === 'shop')
-            @include('livewire.shop-content')
+        @include('livewire.shop-content')
         @elseif($leftPanel === 'status')
-            @include('livewire.status-viewer')
+        @include('livewire.status-viewer')
         @else
         <header class="conversation-header">
-            <div class="conversation-contact">
+            <flux:button wire:click="backToChats" variant="ghost" icon="arrow-left" square class="conversation-back-button" aria-label="Back to chats" />
+            <button type="button" wire:click="openContactProfile" class="conversation-contact" aria-label="Open {{ $this->activeConversation['name'] }} profile">
                 <flux:avatar initials="{{ $this->activeConversation['initials'] }}" color="zinc" size="sm" />
                 <div><strong>{{ $this->activeConversation['name'] }}</strong><span>{{ $this->activeConversation['status'] }}</span></div>
-            </div>
+            </button>
             <div class="header-actions">
                 <flux:button variant="ghost" icon="video-camera" square aria-label="Video call" />
                 <flux:button variant="ghost" icon="magnifying-glass" square aria-label="Search conversation" />
                 <flux:dropdown position="bottom" align="end">
                     <flux:button variant="ghost" icon="ellipsis-vertical" square aria-label="Conversation menu" />
                     <flux:menu>
-                        <flux:menu.item icon="information-circle">Contact info</flux:menu.item>
+                        <flux:menu.item wire:click="openContactProfile" icon="information-circle">Contact info</flux:menu.item>
                         <flux:menu.item icon="archive-box">Archive chat</flux:menu.item>
                     </flux:menu>
                 </flux:dropdown>
             </div>
         </header>
 
-        <section class="messages-area" aria-label="Messages">
+        <section class="messages-area" aria-label="Messages" wire:poll.30s>
             <div class="message-date">Today</div>
+            @if($this->activeConversationPreferences['blocked'])
+            <p class="chat-blocked-notice">Messages are blocked for this conversation.</p>
+            @endif
             @foreach($this->activeConversation['messages'] as $message)
             <div wire:key="message-{{ $loop->index }}" class="message-line {{ $message['mine'] ? 'is-outgoing' : 'is-incoming' }}">
                 <article class="whatsapp-message">
@@ -292,12 +353,86 @@
             <p class="sms-note">Messages are sent over normal SMS. No Wi-Fi or mobile data required.</p>
         </section>
 
+        @if($showEmojiPicker)
+        <section class="emoji-picker" aria-label="Emoji picker">
+            <header class="emoji-picker-header">
+                <strong>Emoji</strong>
+                <flux:button type="button" wire:click="toggleEmojiPicker" variant="ghost" icon="x-mark" square aria-label="Close emoji picker" />
+            </header>
+            <p>Recently used</p>
+            <div class="emoji-grid">
+                @foreach(['😂', '🙌', '🙂', '🙏', '🤦', '🥹', '🤣', '👍', '❤️', '😍', '😅', '🎉', '😊', '😎', '😢', '🤔', '🔥', '👏', '😘', '💯', '✨', '😴', '🤝', '💚'] as $emoji)
+                <button type="button" wire:click="insertEmoji('{{ $emoji }}')" aria-label="Insert {{ $emoji }}">{{ $emoji }}</button>
+                @endforeach
+            </div>
+        </section>
+        @endif
+
         <form wire:submit="sendMessage" class="message-composer">
-            <flux:button type="button" variant="ghost" icon="face-smile" square aria-label="Add emoji" />
+            <div class="composer-entry">
+                <flux:button type="button" wire:click="toggleEmojiPicker" variant="ghost" icon="face-smile" square class="emoji-toggle" aria-label="Add emoji" aria-expanded="{{ $showEmojiPicker ? 'true' : 'false' }}" />
+                <flux:input wire:model="messageDraft" class="composer-input" placeholder="{{ $this->activeConversationPreferences['blocked'] ? 'Unblock this contact to reply' : 'Message' }}" aria-label="Type a message" :disabled="$this->activeConversationPreferences['blocked']" />
+            </div>
             <flux:button type="button" variant="ghost" icon="paper-clip" square aria-label="Attach file" />
-            <flux:input wire:model="messageDraft" class="composer-input" placeholder="Type a message" aria-label="Type a message" />
-            <flux:button type="submit" variant="primary" icon="paper-airplane" square aria-label="Send message" />
+            <flux:button type="submit" variant="primary" icon="paper-airplane" square aria-label="Send message" :disabled="$this->activeConversationPreferences['blocked']" />
         </form>
+        @endif
+
+        @if($showContactProfile && $leftPanel !== 'shop' && $leftPanel !== 'status')
+        <aside class="contact-profile-sheet" role="dialog" aria-modal="true" aria-labelledby="contact-profile-name">
+            <header class="contact-profile-header">
+                <flux:button wire:click="closeContactProfile" variant="ghost" icon="x-mark" square aria-label="Close profile" />
+                <span>Contact info</span>
+                <span class="profile-header-spacer"></span>
+            </header>
+            <div class="contact-profile-content">
+                <div class="contact-profile-identity">
+                    <flux:avatar initials="{{ $this->activeConversation['initials'] }}" color="zinc" size="xl" />
+                    <h2 id="contact-profile-name">{{ $this->activeConversation['name'] }}</h2>
+                    <p>{{ $this->activeConversation['status'] }}</p>
+                    <div class="profile-quick-actions">
+                        <button type="button" wire:click="callActiveConversation" class="profile-quick-action">
+                            <flux:icon.phone /><span>Call</span>
+                        </button>
+                        <button type="button" class="profile-quick-action"><flux:icon.magnifying-glass /><span>Search</span></button>
+                    </div>
+                </div>
+
+                <section class="profile-settings-group" aria-labelledby="profile-chat-settings">
+                    <h3 id="profile-chat-settings">Chat settings</h3>
+                    <label class="profile-setting-row" for="disappearing-messages">
+                        <span class="profile-setting-icon">
+                            <flux:icon.clock />
+                        </span>
+                        <span class="profile-setting-copy"><strong>Disappearing messages</strong><small>New messages on this device</small></span>
+                        <select id="disappearing-messages" class="profile-setting-select" wire:change="setDisappearingMessages($event.target.value)">
+                            <option value="off" @selected($this->activeConversationPreferences['disappearing'] === 'off')>Off</option>
+                            <option value="24h" @selected($this->activeConversationPreferences['disappearing'] === '24h')>24 hours</option>
+                            <option value="7d" @selected($this->activeConversationPreferences['disappearing'] === '7d')>7 days</option>
+                            <option value="90d" @selected($this->activeConversationPreferences['disappearing'] === '90d')>90 days</option>
+                        </select>
+                    </label>
+                </section>
+
+                <section class="profile-settings-group" aria-labelledby="profile-privacy">
+                    <h3 id="profile-privacy">Privacy & security</h3>
+                    <div class="profile-info-row"><span class="profile-setting-icon"><flux:icon.lock-closed /></span><span class="profile-setting-copy"><strong>Encryption</strong><small>Standard SMS is not end-to-end encrypted</small></span>
+                        <flux:badge color="amber">SMS</flux:badge>
+                    </div>
+                    <div class="profile-info-row"><span class="profile-setting-icon"><flux:icon.device-phone-mobile /></span><span class="profile-setting-copy"><strong>Message privacy</strong><small>Clear chat removes messages from this device only</small></span></div>
+                </section>
+
+                <section class="profile-settings-group profile-danger-group" aria-label="Contact actions">
+                    <button type="button" wire:click="clearChat" wire:confirm="Clear all messages in this chat from this device?" class="profile-action-row">
+                        <flux:icon.trash /><span>Clear chat</span>
+                    </button>
+                    <button type="button" wire:click="toggleBlockContact" class="profile-action-row {{ $this->activeConversationPreferences['blocked'] ? '' : 'is-danger' }}"><flux:icon.no-symbol /><span>{{ $this->activeConversationPreferences['blocked'] ? 'Unblock contact' : 'Block contact' }}</span></button>
+                    <button type="button" wire:click="reportContact" wire:confirm="Mark this contact as reported?" class="profile-action-row is-danger" @disabled($this->activeConversationPreferences['reported'])>
+                        <flux:icon.flag /><span>{{ $this->activeConversationPreferences['reported'] ? 'Contact reported' : 'Report contact' }}</span>
+                    </button>
+                </section>
+            </div>
+        </aside>
         @endif
     </main>
 

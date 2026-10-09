@@ -6,10 +6,30 @@ use App\Models\Contact;
 use App\Models\Conversation;
 use App\Models\Status;
 use Flux\Flux;
+use Illuminate\View\View;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
+/**
+ * @phpstan-type ShopProduct array{id: string, category: string, icon: string, eyebrow: string, name: string, description: string, price: int, price_label: string, action: string}
+ * @phpstan-type ContactRow array{id: int, name: string, phone_number: string, initials: string, status: mixed, is_registered: bool}
+ * @phpstan-type CallRow array{name: string, number: string, initials: string, direction: string, time: string, duration: string, missed: bool}
+ * @phpstan-type ChatMessageRow array{body: string, time: string, mine: bool, expires_at?: string, code?: bool, attachment?: bool}
+ * @phpstan-type ConversationRow array{id: int, name: string, initials: string, tone: string, time: string, preview: string, status: string, unread: int, messages: array<int, ChatMessageRow>}
+ *
+ * @property-read array<string, mixed> $activeConversation
+ * @property-read array<string, bool|string> $activeConversationPreferences
+ * @property-read array<int, ContactRow> $filteredContacts
+ * @property-read array<int, CallRow> $filteredCalls
+ * @property-read array<int, ShopProduct> $filteredShopProducts
+ * @property-read array<int, ContactRow> $registeredContacts
+ * @property-read array<int, array{name: string, phone_number: string, initials: string}> $inviteContacts
+ * @property-read array<int, array<string, mixed>> $statusUpdates
+ * @property-read array<int, array<string, mixed>> $recentStatuses
+ * @property-read array<int, array<string, mixed>> $viewedStatuses
+ * @property-read array<string, mixed>|null $activeStatus
+ */
 #[Layout('components.layouts.whatsapp')]
 class WhatsAppChat extends Component
 {
@@ -23,7 +43,16 @@ class WhatsAppChat extends Component
 
     public int $activeConversationId = 1;
 
+    public bool $showConversation = false;
+
+    public bool $showEmojiPicker = false;
+
     public bool $showSettings = false;
+
+    public bool $showContactProfile = false;
+
+    /** @var array<int, array<string, bool|string>> */
+    public array $conversationPreferences = [];
 
     public string $activeSetting = 'profile';
 
@@ -45,8 +74,7 @@ class WhatsAppChat extends Component
 
     public string $shopCategory = 'all';
 
-    public int $shopBalance = 1250;
-
+    /** @var array<int, ShopProduct> */
     public array $shopProducts = [
         ['id' => 'credits-5000', 'category' => 'credits', 'icon' => 'cube', 'eyebrow' => '5,000 BULK SMS', 'name' => 'SMS Credits Package', 'description' => 'High-throughput local GSM routes for campaigns and alerts.', 'price' => 50000, 'price_label' => 'TZS 50,000', 'action' => 'Buy package'],
         ['id' => 'gemini-bot', 'category' => 'bots', 'icon' => 'cpu-chip', 'eyebrow' => 'GEMINI AI BOT', 'name' => 'AI Auto-Responder Bot', 'description' => 'Automated SMS customer support that replies around the clock.', 'price' => 15000, 'price_label' => 'TZS 15,000 / month', 'action' => 'Install bot'],
@@ -56,12 +84,12 @@ class WhatsAppChat extends Component
         ['id' => 'gsm-node', 'category' => 'gateways', 'icon' => 'signal', 'eyebrow' => '99.9% UPTIME', 'name' => 'Dedicated GSM Gateway Node', 'description' => 'A dedicated route for reliable business-critical SMS traffic.', 'price' => 45000, 'price_label' => 'TZS 45,000 / month', 'action' => 'Activate node'],
     ];
 
+    /** @var array<int, array<string, string>> */
     public array $installedShopItems = [
-        ['name' => 'Automated Tourism Concierge Bot', 'type' => 'AI bot', 'status' => 'Active', 'meta' => 'Expires in 18 days', 'icon' => 'sparkles'],
-        ['name' => 'Dedicated GSM Gateway Node', 'type' => 'Gateway', 'status' => 'Active', 'meta' => 'Uptime 99.9%', 'icon' => 'signal'],
     ];
 
     public bool $showContactForm = false;
+
     public bool $showWebContactNotice = false;
 
     public bool $showFavoritePicker = false;
@@ -70,6 +98,21 @@ class WhatsAppChat extends Component
 
     public string $dialNumber = '';
 
+    public bool $showCallScreen = false;
+
+    public string $callName = '';
+
+    public string $callNumber = '';
+
+    public bool $callSpeaker = false;
+
+    public bool $callMuted = false;
+
+    public bool $callVideo = false;
+
+    public bool $callMoreOpen = false;
+
+    /** @var array<int, array<string, mixed>> */
     public array $favorites = [];
 
     public bool $showStatusCreator = false;
@@ -96,7 +139,7 @@ class WhatsAppChat extends Component
 
     public string $statusFont = 'sans';
 
-    public $statusMedia;
+    public mixed $statusMedia = null;
 
     public string $contactFirstName = '';
 
@@ -105,22 +148,27 @@ class WhatsAppChat extends Component
     public string $contactPhone = '';
 
     public string $contactPayloadPrefix = 'MSG:';
+
+    /** @var array<int, array{name: string, phone_number: string, initials: string}> */
     public array $deviceContacts = [
         ['name' => 'Neema Studio', 'phone_number' => '+255 763 100 445', 'initials' => 'NS'],
         ['name' => 'Mariam Hassan', 'phone_number' => '+255 718 220 901', 'initials' => 'MH'],
     ];
 
+    /** @var array<int, array{name: string, number: string, initials: string, direction: string, time: string, duration: string, missed: bool}> */
     public array $calls = [
         ['name' => 'Juma K.', 'number' => '+255 712 884 102', 'initials' => 'JK', 'direction' => 'outbound', 'time' => 'Today, 10:14 AM', 'duration' => '04:32', 'missed' => false],
         ['name' => 'Unknown number', 'number' => '+255 782 328 215', 'initials' => '+255', 'direction' => 'inbound', 'time' => 'Today, 8:42 AM', 'duration' => '01:08', 'missed' => false],
         ['name' => 'Lina A.', 'number' => '+255 754 991 204', 'initials' => 'LA', 'direction' => 'inbound', 'time' => 'Yesterday, 6:20 PM', 'duration' => '', 'missed' => true],
     ];
 
+    /** @var array<int, array{name: string, initials: string, announcement: string}> */
     public array $channels = [
         ['name' => 'AirText updates', 'initials' => '✦', 'announcement' => 'Payload protocol updates and service news'],
         ['name' => 'Dar Studio Network', 'initials' => 'DS', 'announcement' => 'New studio announcements this week'],
     ];
 
+    /** @var array<int, ConversationRow> */
     public array $conversations = [
         [
             'id' => 1,
@@ -165,11 +213,19 @@ class WhatsAppChat extends Component
         ],
     ];
 
+    /** @return ConversationRow */
     public function getActiveConversationProperty(): array
     {
-        return collect($this->conversations)->firstWhere('id', $this->activeConversationId) ?? $this->conversations[0];
+        $conversation = collect($this->conversations)->firstWhere('id', $this->activeConversationId) ?? $this->conversations[0];
+        $conversation['messages'] = collect($conversation['messages'])
+            ->reject(fn (array $message): bool => isset($message['expires_at']) && now()->greaterThanOrEqualTo($message['expires_at']))
+            ->values()
+            ->all();
+
+        return $conversation;
     }
 
+    /** @return array<int, ConversationRow> */
     public function getFilteredConversationsProperty(): array
     {
         return collect($this->conversations)
@@ -179,6 +235,8 @@ class WhatsAppChat extends Component
             ->all();
     }
 
+    /** @return array<int, array<string, int|string>> */
+    /** @return array<int, ShopProduct> */
     public function getFilteredShopProductsProperty(): array
     {
         return collect($this->shopProducts)
@@ -188,22 +246,28 @@ class WhatsAppChat extends Component
             ->all();
     }
 
+    /** @return array<int, ContactRow> */
     public function getFilteredContactsProperty(): array
     {
         return Contact::query()
             ->when($this->search !== '', fn ($query) => $query->where('name', 'like', "%{$this->search}%")->orWhere('phone_number', 'like', "%{$this->search}%"))
             ->orderBy('name')
             ->get()
-            ->map(fn (Contact $contact): array => [
-                'id' => $contact->id,
-                'name' => $contact->name,
-                'phone_number' => $contact->phone_number,
-                'initials' => collect(explode(' ', $contact->name))->map(fn (string $part): string => strtoupper(substr($part, 0, 1)))->take(2)->join(''),
-                'status' => $contact->status_bio,
-                'is_registered' => (bool) ($contact->is_registered ?? true),
-            ])->all();
+            ->map(function (Contact $contact): array {
+                $name = (string) $contact->getAttribute('name');
+
+                return [
+                    'id' => (int) $contact->getKey(),
+                    'name' => $name,
+                    'phone_number' => (string) $contact->getAttribute('phone_number'),
+                    'initials' => collect(explode(' ', $name))->map(fn (string $part): string => strtoupper(substr($part, 0, 1)))->take(2)->join(''),
+                    'status' => $contact->getAttribute('status_bio'),
+                    'is_registered' => (bool) ($contact->getAttribute('is_registered') ?? true),
+                ];
+            })->all();
     }
 
+    /** @return array<int, CallRow> */
     public function getFilteredCallsProperty(): array
     {
         return collect($this->calls)
@@ -212,6 +276,7 @@ class WhatsAppChat extends Component
             ->all();
     }
 
+    /** @return array<int, array<string, mixed>> */
     public function getStatusUpdatesProperty(): array
     {
         return Status::query()
@@ -219,21 +284,24 @@ class WhatsAppChat extends Component
             ->latest()
             ->get()
             ->map(fn (Status $status): array => array_merge($status->toArray(), [
-                'created_at_label' => $status->created_at?->format('M j, g:i A'),
+                'created_at_label' => $status->getAttribute('created_at')?->format('M j, g:i A'),
             ]))
             ->all();
     }
 
+    /** @return array<int, array<string, mixed>> */
     public function getRecentStatusesProperty(): array
     {
         return collect($this->statusUpdates)->where('is_viewed', false)->values()->all();
     }
 
+    /** @return array<int, array<string, mixed>> */
     public function getViewedStatusesProperty(): array
     {
         return collect($this->statusUpdates)->where('is_viewed', true)->values()->all();
     }
 
+    /** @return array<string, mixed>|null */
     public function getActiveStatusProperty(): ?array
     {
         return collect($this->statusUpdates)->firstWhere('id', $this->activeStatusId);
@@ -295,7 +363,8 @@ class WhatsAppChat extends Component
         $status = Status::findOrFail($statusId);
         $status->update(['is_viewed' => true]);
         $this->activeStatusId = $statusId;
-        $this->activeStatusIndex = collect($this->statusUpdates)->pluck('id')->search($statusId) ?: 0;
+        $statusIndex = collect($this->statusUpdates)->pluck('id')->search($statusId);
+        $this->activeStatusIndex = is_int($statusIndex) ? $statusIndex : 0;
         $this->statusPaused = false;
     }
 
@@ -307,7 +376,9 @@ class WhatsAppChat extends Component
     public function nextStatus(): void
     {
         $ids = collect($this->statusUpdates)->pluck('id')->values();
-        if ($ids->isEmpty()) return;
+        if ($ids->isEmpty()) {
+            return;
+        }
         $this->activeStatusIndex = min($this->activeStatusIndex + 1, $ids->count() - 1);
         $this->openStatus((int) $ids[$this->activeStatusIndex]);
     }
@@ -315,7 +386,9 @@ class WhatsAppChat extends Component
     public function previousStatus(): void
     {
         $ids = collect($this->statusUpdates)->pluck('id')->values();
-        if ($ids->isEmpty()) return;
+        if ($ids->isEmpty()) {
+            return;
+        }
         $this->activeStatusIndex = max($this->activeStatusIndex - 1, 0);
         $this->openStatus((int) $ids[$this->activeStatusIndex]);
     }
@@ -394,6 +467,70 @@ class WhatsAppChat extends Component
         $this->dialNumber = '';
     }
 
+    public function openCallInterface(string $number, ?string $name = null): void
+    {
+        $number = preg_replace('/[^0-9*#+]/', '', $number) ?? '';
+        $digits = preg_replace('/\D/', '', $number) ?? '';
+
+        if (strlen($digits) < 3) {
+            Flux::toast(variant: 'danger', text: 'Enter a valid phone number first.');
+
+            return;
+        }
+
+        $call = collect($this->calls)->first(fn (array $entry): bool => preg_replace('/[^0-9*#+]/', '', $entry['number']) === $number);
+        $this->callName = $name ?: ($call['name'] ?? $number);
+        $this->callNumber = $number;
+        $this->callSpeaker = false;
+        $this->callMuted = false;
+        $this->callVideo = false;
+        $this->callMoreOpen = false;
+        $this->showDialpad = false;
+        $this->showCallScreen = true;
+    }
+
+    public function toggleCallControl(string $control): void
+    {
+        match ($control) {
+            'speaker' => $this->callSpeaker = ! $this->callSpeaker,
+            'mute' => $this->callMuted = ! $this->callMuted,
+            'video' => $this->callVideo = ! $this->callVideo,
+            'more' => $this->callMoreOpen = ! $this->callMoreOpen,
+            default => null,
+        };
+    }
+
+    public function callActiveConversation(): void
+    {
+        $name = $this->activeConversation['name'];
+        $call = collect($this->calls)->firstWhere('name', $name);
+
+        if (! $call) {
+            Flux::toast(variant: 'danger', text: 'No phone number is available for this contact.');
+
+            return;
+        }
+
+        $this->openCallInterface($call['number'], $name);
+    }
+
+    public function shareCallNumber(): void
+    {
+        $this->dispatch('share-call-number', number: $this->callNumber);
+    }
+
+    public function closeCallInterface(): void
+    {
+        $this->showCallScreen = false;
+    }
+
+    public function handoffCall(): void
+    {
+        if ($this->showCallScreen) {
+            $this->dispatch('call-number', number: $this->callNumber);
+        }
+    }
+
     public function startCall(): void
     {
         $number = preg_replace('/[^0-9*#+]/', '', $this->dialNumber) ?? '';
@@ -418,14 +555,15 @@ class WhatsAppChat extends Component
             ],
         ], collect($this->calls)->reject(fn (array $call): bool => $call['number'] === $number)->values()->all());
         $this->showDialpad = false;
-
-        Flux::toast(variant: 'success', text: "Calling {$number}...");
-        $this->dispatch('call-number', number: $number);
+        $this->openCallInterface($number, $number);
     }
 
     public function selectConversation(int $conversationId): void
     {
         $this->activeConversationId = $conversationId;
+        $this->showConversation = true;
+        $this->showEmojiPicker = false;
+        $this->showContactProfile = false;
         $this->conversations = collect($this->conversations)->map(function (array $conversation) use ($conversationId): array {
             if ($conversation['id'] === $conversationId) {
                 $conversation['unread'] = 0;
@@ -435,12 +573,91 @@ class WhatsAppChat extends Component
         })->all();
     }
 
+    public function backToChats(): void
+    {
+        $this->showConversation = false;
+        $this->showEmojiPicker = false;
+    }
+
+    public function toggleEmojiPicker(): void
+    {
+        $this->showEmojiPicker = ! $this->showEmojiPicker;
+    }
+
+    public function insertEmoji(string $emoji): void
+    {
+        $this->messageDraft .= $emoji;
+    }
+
+    /** @return array<string, bool|string> */
+    public function getActiveConversationPreferencesProperty(): array
+    {
+        return array_merge(
+            ['disappearing' => 'off', 'blocked' => false, 'reported' => false],
+            $this->conversationPreferences[$this->activeConversationId] ?? [],
+        );
+    }
+
+    public function openContactProfile(): void
+    {
+        $this->showContactProfile = true;
+    }
+
+    public function closeContactProfile(): void
+    {
+        $this->showContactProfile = false;
+    }
+
+    public function setDisappearingMessages(string $duration): void
+    {
+        if (! in_array($duration, ['off', '24h', '7d', '90d'], true)) {
+            return;
+        }
+
+        $this->conversationPreferences[$this->activeConversationId]['disappearing'] = $duration;
+    }
+
+    public function clearChat(): void
+    {
+        $this->conversations = collect($this->conversations)->map(function (array $conversation): array {
+            if ($conversation['id'] === $this->activeConversationId) {
+                $conversation['messages'] = [];
+                $conversation['preview'] = '';
+            }
+
+            return $conversation;
+        })->all();
+
+        $this->showContactProfile = false;
+        Flux::toast(variant: 'success', text: 'Messages cleared from this device.');
+    }
+
+    public function toggleBlockContact(): void
+    {
+        $blocked = ! $this->activeConversationPreferences['blocked'];
+        $this->conversationPreferences[$this->activeConversationId]['blocked'] = $blocked;
+        $this->showContactProfile = false;
+
+        Flux::toast(variant: 'success', text: $blocked ? 'Contact blocked for this session.' : 'Contact unblocked.');
+    }
+
+    public function reportContact(): void
+    {
+        $this->conversationPreferences[$this->activeConversationId]['reported'] = true;
+        $this->showContactProfile = false;
+
+        Flux::toast(variant: 'success', text: 'Contact marked as reported for this session.');
+    }
+
     public function selectContact(int $contactId): void
     {
         $contact = Contact::findOrFail($contactId);
+        $phoneNumber = (string) $contact->getAttribute('phone_number');
+        $name = (string) $contact->getAttribute('name');
+        $statusBio = $contact->getAttribute('status_bio');
         $conversation = Conversation::firstOrCreate(
-            ['phone_number' => $contact->phone_number],
-            ['name' => $contact->name],
+            ['phone_number' => $phoneNumber],
+            ['name' => $name],
         );
 
         $existing = collect($this->conversations)->firstWhere('id', $conversation->id);
@@ -448,24 +665,27 @@ class WhatsAppChat extends Component
         if (! $existing) {
             $this->conversations[] = [
                 'id' => $conversation->id,
-                'name' => $contact->name,
-                'initials' => strtoupper(substr($contact->name, 0, 1)),
+                'name' => $name,
+                'initials' => strtoupper(substr($name, 0, 1)),
                 'tone' => 'bg-stone-400',
                 'time' => 'New',
                 'preview' => 'New SMS conversation',
-                'status' => $contact->status_bio ?? 'SMS contact',
+                'status' => (string) ($statusBio ?? 'SMS contact'),
                 'unread' => 0,
                 'messages' => [],
             ];
         }
 
         $this->activeConversationId = $conversation->id;
+        $this->showConversation = true;
         $this->leftPanel = 'chats';
     }
 
     public function showPanel(string $panel): void
     {
         $this->leftPanel = $panel;
+        $this->showConversation = false;
+        $this->showEmojiPicker = false;
         $this->search = '';
     }
 
@@ -476,8 +696,7 @@ class WhatsAppChat extends Component
 
     public function topUpCredits(): void
     {
-        $this->shopBalance += 1000;
-        Flux::toast(variant: 'success', text: '1,000 SMS credits added to your wallet.');
+        Flux::toast(variant: 'danger', text: 'Payments are not configured. No credits were added.');
     }
 
     public function purchaseShopProduct(string $productId): void
@@ -488,24 +707,7 @@ class WhatsAppChat extends Component
             return;
         }
 
-        if ($product['category'] === 'credits') {
-            $this->shopBalance += 5000;
-            Flux::toast(variant: 'success', text: '5,000 SMS credits added to your wallet.');
-
-            return;
-        }
-
-        if (! collect($this->installedShopItems)->contains('name', $product['name'])) {
-            $this->installedShopItems[] = [
-                'name' => $product['name'],
-                'type' => ucfirst($product['category']),
-                'status' => 'Active',
-                'meta' => 'Ready to configure',
-                'icon' => $product['icon'],
-            ];
-        }
-
-        Flux::toast(variant: 'success', text: "{$product['name']} added to your services.");
+        Flux::toast(variant: 'danger', text: 'Payments are not configured. No purchase was made.');
     }
 
     public function openContactForm(): void
@@ -526,11 +728,13 @@ class WhatsAppChat extends Component
         $this->showWebContactNotice = false;
     }
 
+    /** @return array<int, ContactRow> */
     public function getRegisteredContactsProperty(): array
     {
         return collect($this->filteredContacts)->filter(fn (array $contact): bool => $contact['is_registered'])->values()->all();
     }
 
+    /** @return array<int, array{name: string, phone_number: string, initials: string}> */
     public function getInviteContactsProperty(): array
     {
         $registeredNumbers = Contact::query()->pluck('phone_number')->map(fn (string $number): string => preg_replace('/\s+/', '', $number))->all();
@@ -569,13 +773,13 @@ class WhatsAppChat extends Component
         ]);
 
         $conversation = Conversation::firstOrCreate(
-            ['phone_number' => $contact->phone_number],
-            ['name' => $contact->name],
+            ['phone_number' => $validated['contactPhone']],
+            ['name' => $name],
         );
 
         $this->conversations[] = [
             'id' => $conversation->id,
-            'name' => $contact->name,
+            'name' => $name,
             'initials' => strtoupper(substr($name, 0, 1).substr(strstr($name, ' ') ?: $name, 1, 1)),
             'tone' => 'bg-stone-400',
             'time' => 'New',
@@ -606,19 +810,38 @@ class WhatsAppChat extends Component
 
     public function sendMessage(): void
     {
+        if ($this->activeConversationPreferences['blocked']) {
+            return;
+        }
+
         $body = trim($this->messageDraft);
 
         if ($body === '') {
             return;
         }
 
+        $this->showEmojiPicker = false;
+
         $this->conversations = collect($this->conversations)->map(function (array $conversation) use ($body): array {
             if ($conversation['id'] === $this->activeConversationId) {
-                $conversation['messages'][] = [
+                $message = [
                     'body' => $body,
                     'time' => now()->format('g:i A'),
                     'mine' => true,
                 ];
+
+                $expiry = match ($this->activeConversationPreferences['disappearing']) {
+                    '24h' => now()->addDay(),
+                    '7d' => now()->addDays(7),
+                    '90d' => now()->addDays(90),
+                    default => null,
+                };
+
+                if ($expiry) {
+                    $message['expires_at'] = $expiry->toIso8601String();
+                }
+
+                $conversation['messages'][] = $message;
                 $conversation['preview'] = $body;
                 $conversation['time'] = 'Now';
             }
@@ -629,7 +852,7 @@ class WhatsAppChat extends Component
         $this->reset('messageDraft');
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.whats-app-chat');
     }
