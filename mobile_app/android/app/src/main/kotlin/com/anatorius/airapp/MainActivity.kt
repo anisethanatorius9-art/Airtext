@@ -1,4 +1,4 @@
-package com.example.mobile_app
+package com.anatorius.airapp
 
 import io.flutter.embedding.android.FlutterActivity
 
