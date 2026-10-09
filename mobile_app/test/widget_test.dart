@@ -137,7 +137,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Communities'));
     await tester.pumpAndSettle();
-    expect(find.text('AirText Community'), findsOneWidget);
+    expect(find.text('Air app Community'), findsOneWidget);
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
 
@@ -333,7 +333,7 @@ void main() {
     expect(find.text('Document sharing'), findsOneWidget);
     expect(
       find.text(
-        'The AirText message API currently accepts text messages only.',
+        'The Air app message API currently accepts text messages only.',
       ),
       findsOneWidget,
     );

@@ -27,11 +27,11 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>AirText uses the camera when you choose to take a photo or video for a message.</string>
+	<string>Air app uses the camera when you choose to take a photo or video for a message.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>AirText uses the microphone when you record a video for a message.</string>
+	<string>Air app uses the microphone when you record a video for a message.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>AirText uses your photo library when you choose media for a message or profile photo.</string>
+	<string>Air app uses your photo library when you choose media for a message or profile photo.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -390,7 +390,7 @@ class AirTextApi {
             decoded['message'] as String? ??
             (firstError is List && firstError.isNotEmpty
                 ? firstError.first as String
-                : 'AirText request failed (${response.statusCode}).');
+              : 'Air app request failed (${response.statusCode}).');
         throw AirTextApiException(message, response.statusCode);
       }
       return decoded;
@@ -398,12 +398,12 @@ class AirTextApi {
       rethrow;
     } on http.ClientException {
       throw const AirTextApiException(
-        'Could not reach AirText. Check the server address and connection.',
+        'Could not reach Air app. Check the server address and connection.',
         0,
       );
     } on FormatException {
       throw const AirTextApiException(
-        'The AirText server returned invalid data.',
+        'The Air app server returned invalid data.',
         0,
       );
     }
@@ -722,7 +722,7 @@ class _ChatsPageState extends State<ChatsPage> {
     ChatConversation(
       name: 'Mariam Hassan',
       initials: 'MH',
-      status: 'AirText contact',
+      status: 'Air app contact',
       time: '10:42 AM',
       unread: 2,
       color: const Color(0xFFD6E9DE),
@@ -793,7 +793,7 @@ class _ChatsPageState extends State<ChatsPage> {
     ),
   ];
   String _displayName = 'Air app User';
-  String _username = '@airtextuser';
+  String _username = '@airapp';
   String _about = 'Available';
   Uint8List? _profileImage;
 
@@ -1125,7 +1125,7 @@ class _ChatsPageState extends State<ChatsPage> {
                 controller: emailController,
                 keyboardType: TextInputType.emailAddress,
                 decoration: const InputDecoration(
-                  labelText: 'AirText account email',
+                  labelText: 'Air app account email',
                 ),
               ),
               const Padding(
@@ -1276,7 +1276,7 @@ class _ChatsPageState extends State<ChatsPage> {
     if (!mounted) return;
     setState(() {
       _displayName = 'Air app User';
-      _username = '@airtextuser';
+      _username = '@airapp';
       _about = 'Available';
       _profileImage = null;
       _selectedTab = 0;
@@ -1301,7 +1301,7 @@ class _ChatsPageState extends State<ChatsPage> {
     setState(() {
       _contacts = [];
       _displayName = 'Air app User';
-      _username = '@airtextuser';
+      _username = '@airapp';
       _about = 'Available';
       _profileImage = null;
       _selectedTab = 0;
@@ -1644,7 +1644,7 @@ class _LinkDevicePage extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               const Text(
-                'Device linking needs an authenticated AirText account service.',
+                'Device linking needs an authenticated Air app account service.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: _ink,
@@ -1905,7 +1905,7 @@ class _ContactsPageState extends State<_ContactsPage> {
     final uri = Uri(
       scheme: 'sms',
       path: contact.phoneNumber.replaceAll(RegExp(r'\s+'), ''),
-      queryParameters: {'body': 'Join me on AirText.'},
+      queryParameters: {'body': 'Join me on Air app.'},
     );
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication) &&
         mounted) {
@@ -2289,7 +2289,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                   ),
                 ),
                 Text(
-                  isAirTextRoute ? 'AIRTEXT' : 'SMS',
+                  isAirTextRoute ? 'AIR APP' : 'SMS',
                   style: TextStyle(
                     color: routeColor,
                     fontSize: 9,
@@ -2666,17 +2666,17 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       case 'document':
         await _showUnavailableFeature(
           'Document sharing',
-          'The AirText message API currently accepts text messages only.',
+          'The Air app message API currently accepts text messages only.',
         );
       case 'location':
         await _showUnavailableFeature(
           'Location sharing',
-          'Location sharing is not connected to the AirText message API yet.',
+          'Location sharing is not connected to the Air app message API yet.',
         );
       case 'contact':
         await _showUnavailableFeature(
           'Contact sharing',
-          'Contact cards are not connected to the AirText message API yet.',
+          'Contact cards are not connected to the Air app message API yet.',
         );
     }
   }
@@ -2715,13 +2715,13 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     if (file == null || !mounted) return;
     await _showUnavailableFeature(
       'Media selected',
-      'Media upload is not connected to the AirText message API yet.',
+      'Media upload is not connected to the Air app message API yet.',
     );
   }
 
   Future<void> _showVoiceUnavailable() => _showUnavailableFeature(
     'Voice messages',
-    'Voice recording and audio upload are not connected to the AirText message API yet.',
+    'Voice recording and audio upload are not connected to the Air app message API yet.',
   );
 
   Future<void> _showUnavailableFeature(String title, String message) async {
@@ -2916,7 +2916,7 @@ class _AirTextShopPageState extends State<_AirTextShopPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'AirText Shop',
+                        'Air app Shop',
                         style: TextStyle(
                           color: text,
                           fontSize: 23,
@@ -3302,7 +3302,7 @@ class _PhoneCallPageState extends State<_PhoneCallPage> {
                       const Icon(Icons.lock_outline, color: Colors.white70, size: 15),
                       const SizedBox(width: 6),
                       const Text(
-                        'AIRTEXT CALL',
+                        'AIR APP CALL',
                         style: TextStyle(
                           color: Colors.white70,
                           fontSize: 11,
@@ -4109,9 +4109,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
         ? (isDark ? widget.accentColor : _green)
         : (isDark ? const Color(0xFFD9B77A) : const Color(0xFF805A18));
     final routeLabel = isFailed
-        ? '${widget.isAirTextRoute ? 'AIRTEXT' : 'SMS'} · FAILED'
+        ? '${widget.isAirTextRoute ? 'AIR APP' : 'SMS'} · FAILED'
         : widget.isAirTextRoute
-        ? 'AIRTEXT'
+        ? 'AIR APP'
         : 'SMS';
     return Column(
       crossAxisAlignment: message.isMine
@@ -4447,7 +4447,7 @@ class _UpdatesPageState extends State<_UpdatesPage> {
   ];
   final List<_Community> _communities = [
     _Community(
-      'AirText Community',
+      'Air app Community',
       'Announcements and product updates',
       members: 248,
     ),
@@ -5471,11 +5471,11 @@ class _AccountPageState extends State<_AccountPage> {
                 ),
                 title: const Text('Sign out'),
                 subtitle: const Text(
-                  'Sign out of AirText and clear this device profile',
+                  'Sign out of Air app and clear this device profile',
                 ),
                 onTap: () => _confirmAction(
                   title: 'Sign out?',
-                  message: 'Your AirText session and local profile will be cleared from this device.',
+                  message: 'Your Air app session and local profile will be cleared from this device.',
                   action: 'Sign out',
                   onConfirm: widget.onSignOut,
                 ),
@@ -5496,7 +5496,7 @@ class _AccountPageState extends State<_AccountPage> {
                 ),
                 onTap: () => _confirmAction(
                   title: 'Delete local data?',
-                  message: 'This removes the profile and saved contacts from this device, not the AirText account.',
+                  message: 'This removes the profile and saved contacts from this device, not the Air app account.',
                   action: 'Delete',
                   onConfirm: widget.onDeleteLocalData,
                   destructive: true,
@@ -5680,7 +5680,7 @@ class _ChatThemePage extends StatelessWidget {
   final AirTextAppearance appearance;
 
   static const _swatches = [
-    (name: 'AirText Mint', color: Color(0xFF9BE2BD)),
+    (name: 'Air app Mint', color: Color(0xFF9BE2BD)),
     (name: 'Ocean Blue', color: Color(0xFF78B7E1)),
     (name: 'Soft Rose', color: Color(0xFFF08DA0)),
     (name: 'Signal Amber', color: Color(0xFFD9B77A)),
@@ -5896,9 +5896,9 @@ class _SettingsPage extends StatelessWidget {
                 children: [
                   _SettingsTile(
                     icon: Icons.info_outline,
-                    title: 'Help & About AirText',
+                    title: 'Help & About Air app',
                     subtitle: 'Payload protocol updates',
-                    onTap: () => _openSettings(context, 'Help & About AirText'),
+                    onTap: () => _openSettings(context, 'Help & About Air app'),
                   ),
                 ],
               ),
@@ -6034,7 +6034,7 @@ class _SettingsDetailPageState extends State<_SettingsDetailPage> {
                 const _GroupDivider(),
                 const ListTile(
                   title: Text('Payload protocol'),
-                  subtitle: Text('AirText protocol v1.0'),
+                  subtitle: Text('Air app protocol v1.0'),
                   trailing: Icon(Icons.chevron_right),
                 ),
               ],
