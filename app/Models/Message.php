@@ -14,8 +14,15 @@ use Illuminate\Support\Carbon;
  * @property int|null $sender_id
  * @property string $direction
  * @property string $body
+ * @property string $message_type
+ * @property string|null $media_path
  * @property string $payload_prefix
  * @property string $status
+ * @property bool $view_once
+ * @property Carbon|null $delivered_at
+ * @property Carbon|null $read_at
+ * @property Carbon|null $viewed_at
+ * @property Carbon|null $expires_at
  * @property Carbon|null $sent_at
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
@@ -30,8 +37,15 @@ class Message extends Model
         'sender_id',
         'direction',
         'body',
+        'message_type',
+        'media_path',
         'payload_prefix',
         'status',
+        'view_once',
+        'delivered_at',
+        'read_at',
+        'viewed_at',
+        'expires_at',
         'sent_at',
     ];
 
@@ -40,6 +54,11 @@ class Message extends Model
         return [
             'body' => 'encrypted',
             'sent_at' => 'datetime',
+            'expires_at' => 'datetime',
+            'view_once' => 'boolean',
+            'delivered_at' => 'datetime',
+            'read_at' => 'datetime',
+            'viewed_at' => 'datetime',
         ];
     }
 

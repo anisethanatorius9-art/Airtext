@@ -1,0 +1,13 @@
+{
+  "Your AirText verification code": "您的 AirText 验证码",
+  "Your AirText verification code is:": "您的 AirText 验证码是：",
+  "This code expires in 10 minutes. If you did not request it, you can ignore this email.": "此验证码将在 10 分钟后过期。如果这不是您请求的，请忽略此邮件。",
+  "Your AirText verification code is :code. It expires in 10 minutes.": "您的 AirText 验证码是 :code。验证码将在 10 分钟后过期。",
+  "Your AirText sign-in verification code is :code. It expires in 10 minutes.": "您的 AirText 登录验证码是 :code。验证码将在 10 分钟后过期。",
+  "If this address can receive AirText codes, one has been sent.": "如果此邮箱可以接收 AirText 验证码，我们已向其发送验证码。",
+  "The verification code is invalid or expired.": "验证码无效或已过期。",
+  "Phone verification is temporarily unavailable.": "手机验证暂时不可用。",
+  "A verification code has been sent.": "验证码已发送。",
+  "Signed out.": "已退出登录。",
+  "Message translation is temporarily unavailable.": "消息翻译暂时不可用。"
+}

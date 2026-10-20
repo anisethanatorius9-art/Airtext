@@ -24,12 +24,52 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>midnight</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>AppIconMidnight</string></array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+		</dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+	</dict>
+	<key>CFBundleIcons~ipad</key>
+	<dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>midnight</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array><string>AppIconMidnight</string></array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+		</dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+	</dict>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Air app uses the camera when you choose to take a photo or video for a message.</string>
+	<string>Air app uses the camera for video calls and when you choose media for a message.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Air app reads phone numbers only when you choose to sync your contacts.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Air app uses Face ID to protect your chats and app session.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Air app uses the microphone when you record a video for a message.</string>
+	<string>Air app uses the microphone for voice and video calls and when recording media.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Air app uses your photo library when you choose media for a message or profile photo.</string>
 	<key>UIApplicationSceneManifest</key>

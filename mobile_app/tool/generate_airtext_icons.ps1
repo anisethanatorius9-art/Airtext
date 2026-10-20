@@ -11,6 +11,110 @@ function New-RoundedPath([float]$x, [float]$y, [float]$width, [float]$height, [f
     return $path
 }
 
+function Draw-AirTextMark($graphics, [bool]$foregroundOnly) {
+    $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 248, 255, 255))
+    $feather = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $feather.AddBezier(
+        [System.Drawing.PointF]::new(30, 91),
+        [System.Drawing.PointF]::new(38, 65),
+        [System.Drawing.PointF]::new(60, 39),
+        [System.Drawing.PointF]::new(96, 22)
+    )
+    $feather.AddBezier(
+        [System.Drawing.PointF]::new(96, 22),
+        [System.Drawing.PointF]::new(87, 49),
+        [System.Drawing.PointF]::new(67, 72),
+        [System.Drawing.PointF]::new(30, 91)
+    )
+    $feather.CloseFigure()
+    $graphics.FillPath($white, $feather)
+
+    if (-not $foregroundOnly) {
+        $cut = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 16, 183, 177), 3.2)
+        $cut.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+        $cut.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+        $graphics.DrawLine($cut, 39, 82, 79, 48)
+        $graphics.DrawLine($cut, 49, 73, 88, 39)
+        $graphics.DrawLine($cut, 59, 64, 91, 30)
+        $cut.Dispose()
+    }
+
+    $chat = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $chat.AddBezier(
+        [System.Drawing.PointF]::new(44, 28),
+        [System.Drawing.PointF]::new(29, 30),
+        [System.Drawing.PointF]::new(22, 42),
+        [System.Drawing.PointF]::new(26, 55)
+    )
+    $chat.AddBezier(
+        [System.Drawing.PointF]::new(26, 55),
+        [System.Drawing.PointF]::new(28, 65),
+        [System.Drawing.PointF]::new(34, 71),
+        [System.Drawing.PointF]::new(42, 75)
+    )
+    $chat.AddBezier(
+        [System.Drawing.PointF]::new(42, 75),
+        [System.Drawing.PointF]::new(51, 92),
+        [System.Drawing.PointF]::new(68, 96),
+        [System.Drawing.PointF]::new(78, 89)
+    )
+    $chat.AddLine(78, 89, 85, 96)
+    $chat.AddLine(85, 96, 83, 82)
+    $chat.AddBezier(
+        [System.Drawing.PointF]::new(83, 82),
+        [System.Drawing.PointF]::new(87, 77),
+        [System.Drawing.PointF]::new(90, 72),
+        [System.Drawing.PointF]::new(91, 65)
+    )
+    $outline = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 248, 255, 255), 2.8)
+    $outline.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $outline.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $outline.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
+    $graphics.DrawPath($outline, $chat)
+
+    $shield = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $shield.AddPolygon(@(
+        [System.Drawing.PointF]::new(99, 83),
+        [System.Drawing.PointF]::new(111, 87),
+        [System.Drawing.PointF]::new(109, 99),
+        [System.Drawing.PointF]::new(99, 108),
+        [System.Drawing.PointF]::new(89, 99),
+        [System.Drawing.PointF]::new(87, 87)
+    ))
+    $shieldColor = if ($foregroundOnly) {
+        [System.Drawing.Color]::FromArgb(255, 248, 255, 255)
+    } else {
+        [System.Drawing.Color]::FromArgb(255, 146, 244, 240)
+    }
+    $shieldBrush = New-Object System.Drawing.SolidBrush($shieldColor)
+    $graphics.FillPath($shieldBrush, $shield)
+
+    if (-not $foregroundOnly) {
+        $star = New-Object System.Drawing.Drawing2D.GraphicsPath
+        $star.AddPolygon(@(
+            [System.Drawing.PointF]::new(99, 88),
+            [System.Drawing.PointF]::new(101, 94),
+            [System.Drawing.PointF]::new(106, 96),
+            [System.Drawing.PointF]::new(101, 98),
+            [System.Drawing.PointF]::new(99, 103),
+            [System.Drawing.PointF]::new(97, 98),
+            [System.Drawing.PointF]::new(92, 96),
+            [System.Drawing.PointF]::new(97, 94)
+        ))
+        $starBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 11, 159, 155))
+        $graphics.FillPath($starBrush, $star)
+        $starBrush.Dispose()
+        $star.Dispose()
+    }
+
+    $shieldBrush.Dispose()
+    $shield.Dispose()
+    $outline.Dispose()
+    $chat.Dispose()
+    $feather.Dispose()
+    $white.Dispose()
+}
+
 function Save-AirTextIcon([string]$filePath, [bool]$background, [bool]$foregroundOnly) {
     $bitmap = New-Object System.Drawing.Bitmap(1024, 1024, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
@@ -18,50 +122,35 @@ function Save-AirTextIcon([string]$filePath, [bool]$background, [bool]$foregroun
     $graphics.Clear([System.Drawing.Color]::Transparent)
 
     if ($background) {
-        $base = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 18, 59, 80))
-        $graphics.FillRectangle($base, 0, 0, 1024, 1024)
-        $base.Dispose()
+        $shadowPath = New-RoundedPath 88 100 848 848 190
+        $shadow = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(48, 0, 80, 93))
+        $graphics.FillPath($shadow, $shadowPath)
+        $tile = New-RoundedPath 88 76 848 848 190
+        $bounds = New-Object System.Drawing.Rectangle(88, 76, 848, 848)
+        $gradient = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+            $bounds,
+            [System.Drawing.Color]::FromArgb(255, 8, 151, 127),
+            [System.Drawing.Color]::FromArgb(255, 17, 207, 219),
+            42
+        )
+        $graphics.FillPath($gradient, $tile)
+        $edge = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(68, 255, 255, 255), 3)
+        $graphics.DrawPath($edge, $tile)
+        $edge.Dispose()
+        $gradient.Dispose()
+        $shadow.Dispose()
+        $tile.Dispose()
+        $shadowPath.Dispose()
     }
 
-    if ($foregroundOnly) {
-        $x = 230; $y = 250; $width = 564; $height = 350; $radius = 76
-        $tailPoints = @([System.Drawing.Point]::new(276, 560), [System.Drawing.Point]::new(260, 742), [System.Drawing.Point]::new(450, 585))
-        $line1 = [System.Drawing.Point]::new(335, 355); $line2 = [System.Drawing.Point]::new(690, 355)
-        $line3 = [System.Drawing.Point]::new(335, 430); $line4 = [System.Drawing.Point]::new(545, 430)
-        $pulsePoints = @([System.Drawing.Point]::new(545, 530), [System.Drawing.Point]::new(590, 486), [System.Drawing.Point]::new(635, 530), [System.Drawing.Point]::new(704, 450))
-    } else {
-        $x = 190; $y = 205; $width = 644; $height = 470; $radius = 94
-        $tailPoints = @([System.Drawing.Point]::new(250, 625), [System.Drawing.Point]::new(216, 826), [System.Drawing.Point]::new(452, 642))
-        $line1 = [System.Drawing.Point]::new(320, 350); $line2 = [System.Drawing.Point]::new(700, 350)
-        $line3 = [System.Drawing.Point]::new(320, 445); $line4 = [System.Drawing.Point]::new(555, 445)
-        $pulsePoints = @([System.Drawing.Point]::new(560, 570), [System.Drawing.Point]::new(612, 518), [System.Drawing.Point]::new(664, 570), [System.Drawing.Point]::new(750, 470))
-    }
-
-    $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
-    $bubble = New-RoundedPath $x $y $width $height $radius
-    $graphics.FillPath($white, $bubble)
-    $tail = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $tail.AddPolygon($tailPoints)
-    $graphics.FillPath($white, $tail)
-
-    $ink = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 18, 59, 80), 28)
-    $ink.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $ink.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $graphics.DrawLine($ink, $line1, $line2)
-    $graphics.DrawLine($ink, $line3, $line4)
-
-    $signal = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 255, 190, 85), 27)
-    $signal.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $signal.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $signal.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
-    $graphics.DrawLines($signal, $pulsePoints)
+    $markScale = 5.2
+    $offset = (1024 - (126 * $markScale)) / 2
+    $matrix = New-Object System.Drawing.Drawing2D.Matrix($markScale, 0, 0, $markScale, $offset, $offset)
+    $graphics.Transform = $matrix
+    Draw-AirTextMark $graphics $foregroundOnly
 
     $bitmap.Save($filePath, [System.Drawing.Imaging.ImageFormat]::Png)
-    $signal.Dispose()
-    $ink.Dispose()
-    $tail.Dispose()
-    $bubble.Dispose()
-    $white.Dispose()
+    $matrix.Dispose()
     $graphics.Dispose()
     $bitmap.Dispose()
 }

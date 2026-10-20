@@ -30,6 +30,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: any
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -40,7 +43,20 @@ dependencies:
   emoji_picker_flutter: ^4.5.4
   http: ^1.6.0
   flutter_secure_storage: 11.2.0
-  jitsi_meet_flutter_sdk: ^13.2.0
+  flutter_webrtc: ^1.6.2+hotfix.4
+  web_socket_channel: ^3.0.3
+  livekit_client: ^2.13.1
+  firebase_core: ^4.15.0
+  firebase_messaging: ^16.7.0
+  flutter_sms: ^3.0.1
+  permission_handler: ^13.0.2
+  path_provider: ^2.1.6
+  local_auth: ^3.0.2
+  audioplayers: ^6.8.1
+  dynamic_app_icon_flutter_plus: ^2.2.1
+  flutter_contacts: ^2.6.0
+  flutter_local_notifications: ^22.3.2
+  record: ^7.1.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -61,16 +77,33 @@ flutter_launcher_icons:
   android: true
   ios: true
   image_path: assets/airtext_app_icon.png
-  adaptive_icon_background: '#123B50'
+  adaptive_icon_background: '#07977F'
   adaptive_icon_foreground: assets/airtext_adaptive_foreground.png
   remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: assets/airtext_app_icon.png
+    background_color: '#F4F8F6'
+    theme_color: '#07977F'
+  windows:
+    generate: true
+    image_path: assets/airtext_app_icon.png
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: assets/airtext_app_icon.png
+    icon_size: 1024
 
 flutter:
+  generate: true
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/airtext_app_icon.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

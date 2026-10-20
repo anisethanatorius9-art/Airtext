@@ -16,7 +16,7 @@ class AirTextLoginCode extends Mailable
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: 'Your AirText verification code');
+        return new Envelope(subject: __('Your AirText verification code'));
     }
 
     public function content(): Content
