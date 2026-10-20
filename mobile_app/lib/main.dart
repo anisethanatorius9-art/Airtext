@@ -1,17 +1,72 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
+import 'dart:io';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:dynamic_app_icon_flutter_plus/dynamic_app_icon_flutter_plus.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter/foundation.dart'
+    show debugPrint, defaultTargetPlatform, TargetPlatform;
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:mobile_app/active_video_call_screen.dart';
+import 'package:mobile_app/airtext_call_client.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import 'package:jitsi_meet_flutter_sdk/jitsi_meet_flutter_sdk.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+import 'firebase_options.dart';
+import 'l10n/app_localizations.dart';
+import 'services/cache_manager_service.dart';
+import 'services/sms_fallback_service.dart';
+import 'services/storage_settings_service.dart';
+import 'screens/auth/email_otp_screen.dart';
+import 'screens/auth/email_register_screen.dart';
+import 'screens/auth/auth_screen_frame.dart';
+import 'screens/auth/phone_verify_screen.dart';
+import 'screens/auth/profile_setup_screen.dart';
+import 'screens/auth/welcome_screen.dart';
+import 'services/app_lock_service.dart';
+import 'services/notification_sound_service.dart';
+import 'video_call_screen.dart';
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  final options = airTextFirebaseOptions;
+  if (options == null) return;
+  if (Firebase.apps.isEmpty) await Firebase.initializeApp(options: options);
+}
+
+final FlutterLocalNotificationsPlugin _localNotifications =
+    FlutterLocalNotificationsPlugin();
+
+const MethodChannel _screenPrivacyChannel = MethodChannel(
+  'airtext/screen_privacy',
+);
+const MethodChannel _deviceInfoChannel = MethodChannel('airtext/device_info');
+
+Future<void> _setScreenPrivacy(bool enabled) async {
+  if (defaultTargetPlatform != TargetPlatform.android) return;
+  try {
+    await _screenPrivacyChannel.invokeMethod<void>('setEnabled', {
+      'enabled': enabled,
+    });
+  } on MissingPluginException {
+    debugPrint('Screen privacy channel unavailable.');
+  } on PlatformException catch (error) {
+    debugPrint('Screen privacy channel unavailable: ${error.code}');
+  }
+}
 
 const _ink = Color(0xFF18231E);
 const _green = Color(0xFF008069);
@@ -32,115 +87,364 @@ const _nexusBorder = Color(0xFF35413B);
 const _nexusText = Color(0xFFE7ECE9);
 const _nexusMuted = Color(0xFFB0BBB4);
 const _nexusAccent = Color(0xFFB9E878);
+const _languageCodes = <String, String>{
+  'Kiswahili': 'sw',
+  'English': 'en',
+  'French': 'fr',
+  'Spanish': 'es',
+  'Arabic': 'ar',
+  'Mandarin Chinese': 'zh',
+  'Portuguese': 'pt',
+  'Hindi': 'hi',
+  'Russian': 'ru',
+  'German': 'de',
+  'Japanese': 'ja',
+  'Korean': 'ko',
+  'Italian': 'it',
+  'Turkish': 'tr',
+  'Vietnamese': 'vi',
+  'Urdu': 'ur',
+  'Persian': 'fa',
+  'Polish': 'pl',
+  'Ukrainian': 'uk',
+  'Dutch': 'nl',
+  'Greek': 'el',
+  'Bengali': 'bn',
+  'Punjabi': 'pa',
+  'Javanese': 'jv',
+  'Telugu': 'te',
+  'Marathi': 'mr',
+  'Tamil': 'ta',
+  'Gujarati': 'gu',
+  'Hausa': 'ha',
+  'Yoruba': 'yo',
+  'Igbo': 'ig',
+  'Amharic': 'am',
+  'Zulu': 'zu',
+  'Xhosa': 'xh',
+  'Somali': 'so',
+  'Malay / Indonesian': 'id',
+  'Tagalog': 'tl',
+  'Thai': 'th',
+  'Hungarian': 'hu',
+  'Czech': 'cs',
+  'Swedish': 'sv',
+  'Danish': 'da',
+  'Finnish': 'fi',
+  'Norwegian': 'no',
+  'Romanian': 'ro',
+  'Hebrew': 'he',
+  'Bulgarian': 'bg',
+  'Serbian': 'sr',
+  'Croatian': 'hr',
+  'Slovak': 'sk',
+};
+const _appTranslations = <String, Map<String, String>>{
+  'fr': {
+    'Chats': 'Discussions',
+    'Updates': 'Actualités',
+    'Shop': 'Boutique',
+    'Settings': 'Paramètres',
+    'Profile': 'Profil',
+    'ACCOUNT': 'COMPTE',
+    'Photo, username and about': 'Photo, nom d’utilisateur et bio',
+    'Account': 'Compte',
+    'Registration, sign out and data': 'Inscription, déconnexion et données',
+    'DISPLAY': 'AFFICHAGE',
+    'Appearance': 'Apparence',
+    'Chat Theme': 'Thème des discussions',
+    'MESSAGING': 'MESSAGERIE',
+    'GSM & SMS Protocol': 'Protocole GSM et SMS',
+    'Manage offline messaging': 'Gérer la messagerie hors ligne',
+    'Notifications': 'Notifications',
+    'Message & call tones': 'Sons des messages et des appels',
+    'Storage and data': 'Stockage et données',
+    'Chats, media, auto-download': 'Discussions, médias, téléchargement auto.',
+    'PRIVACY & ACCESS': 'CONFIDENTIALITÉ ET ACCÈS',
+    'Privacy': 'Confidentialité',
+    'Last seen, profile visibility': 'Dernière présence, visibilité du profil',
+    'Accessibility': 'Accessibilité',
+    'Text size, motion and display': 'Taille du texte, animations et affichage',
+    'App language': 'Langue de l’application',
+    'Tap to change app language': 'Touchez pour changer la langue',
+    'Invite friend': 'Inviter un ami',
+    'Share AirText with a friend': 'Partager AirText avec un ami',
+    'MORE': 'PLUS',
+    'Help & feedback': 'Aide et commentaires',
+    'Reports, policy and support': 'Signalements, règles et assistance',
+    'LANGUAGE': 'LANGUE',
+    'New conversation': 'Nouvelle discussion',
+    'Close command sphere': 'Fermer les commandes',
+    'Open command sphere': 'Ouvrir les commandes',
+    'More options': 'Plus d’options',
+    'Search or start a new chat': 'Rechercher ou démarrer une discussion',
+    'New message': 'Nouveau message',
+    'Contacts': 'Contacts',
+    'Calls': 'Appels',
+    'All': 'Tout',
+    'Unread': 'Non lus',
+    'No chats found': 'Aucune discussion trouvée',
+    'Marketplace': 'Place de marché',
+    'Payments are not connected': 'Les paiements ne sont pas connectés',
+    'Wallet': 'Portefeuille',
+    'Not connected': 'Non connecté',
+    'Search products and services': 'Rechercher des produits et services',
+    'Browse': 'Parcourir',
+    'Installed': 'Installés',
+    'SMS Bots': 'Bots SMS',
+    'Gateways': 'Passerelles',
+    'Templates': 'Modèles',
+    'No products found': 'Aucun produit trouvé',
+    'No installed services': 'Aucun service installé',
+    'Payments are not configured. No credits were added.':
+        'Les paiements ne sont pas configurés. Aucun crédit n’a été ajouté.',
+    'Payments are not configured. No purchase was made.':
+        'Les paiements ne sont pas configurés. Aucun achat n’a été effectué.',
+    'RECENT UPDATES': 'ACTUALITÉS RÉCENTES',
+    'VIEWED UPDATES': 'ACTUALITÉS CONSULTÉES',
+    'COMMUNITIES': 'COMMUNAUTÉS',
+    'My Status': 'Mon statut',
+    'Sign in to see status updates from your contacts.':
+        'Connectez-vous pour voir les actualités de vos contacts.',
+    'No recent updates.': 'Aucune actualité récente.',
+    'Sign in to share status updates.':
+        'Connectez-vous pour partager des actualités.',
+    'Communities': 'Communautés',
+    'Refresh updates': 'Actualiser les actualités',
+    'STATUS': 'STATUT',
+    'Tap to add a status update': 'Touchez pour ajouter un statut',
+  },
+  'sw': {
+    'Chats': 'Mazungumzo',
+    'Updates': 'Taarifa',
+    'Shop': 'Duka',
+    'Settings': 'Mipangilio',
+    'Profile': 'Wasifu',
+    'ACCOUNT': 'AKAUNTI',
+    'Photo, username and about': 'Picha, jina la mtumiaji na maelezo',
+    'Account': 'Akaunti',
+    'Registration, sign out and data': 'Usajili, kutoka na data',
+    'DISPLAY': 'MWONEKANO',
+    'Appearance': 'Mwonekano',
+    'Chat Theme': 'Mandhari ya mazungumzo',
+    'MESSAGING': 'UJUMBE',
+    'GSM & SMS Protocol': 'Itifaki ya GSM na SMS',
+    'Manage offline messaging': 'Dhibiti ujumbe bila intaneti',
+    'Notifications': 'Arifa',
+    'Message & call tones': 'Sauti za ujumbe na simu',
+    'Storage and data': 'Hifadhi na data',
+    'Chats, media, auto-download': 'Mazungumzo, media, upakuaji wa kiotomatiki',
+    'PRIVACY & ACCESS': 'FARAGHA NA UFIKIAJI',
+    'Privacy': 'Faragha',
+    'Last seen, profile visibility': 'Mara ya mwisho, mwonekano wa wasifu',
+    'Accessibility': 'Ufikivu',
+    'Text size, motion and display': 'Ukubwa wa maandishi, mwendo na mwonekano',
+    'App language': 'Lugha ya programu',
+    'Tap to change app language': 'Gusa kubadilisha lugha ya programu',
+    'Invite friend': 'Alika rafiki',
+    'Share AirText with a friend': 'Shiriki AirText na rafiki',
+    'MORE': 'ZAIDI',
+    'Help & feedback': 'Msaada na maoni',
+    'Reports, policy and support': 'Ripoti, sera na usaidizi',
+    'LANGUAGE': 'LUGHA',
+    'New conversation': 'Mazungumzo mapya',
+    'Close command sphere': 'Funga menyu ya amri',
+    'Open command sphere': 'Fungua menyu ya amri',
+    'More options': 'Chaguo zaidi',
+    'Search or start a new chat': 'Tafuta au anza mazungumzo mapya',
+    'New message': 'Ujumbe mpya',
+    'Contacts': 'Anwani',
+    'Calls': 'Simu',
+    'All': 'Zote',
+    'Unread': 'Hazijasomwa',
+    'No chats found': 'Hakuna mazungumzo yaliyopatikana',
+    'Marketplace': 'Soko',
+    'Payments are not connected': 'Malipo hayajaunganishwa',
+    'Wallet': 'Pochi',
+    'Not connected': 'Haijaunganishwa',
+    'Search products and services': 'Tafuta bidhaa na huduma',
+    'Browse': 'Vinjari',
+    'Installed': 'Zilizosakinishwa',
+    'SMS Bots': 'Boti za SMS',
+    'Gateways': 'Milango ya mtandao',
+    'Templates': 'Violezo',
+    'No products found': 'Hakuna bidhaa zilizopatikana',
+    'No installed services': 'Hakuna huduma zilizosakinishwa',
+    'Payments are not configured. No credits were added.':
+        'Malipo hayajawekwa. Salio halijaongezwa.',
+    'Payments are not configured. No purchase was made.':
+        'Malipo hayajawekwa. Hakuna ununuzi uliofanyika.',
+    'RECENT UPDATES': 'TAARIFA ZA HIVI KARIBUNI',
+    'VIEWED UPDATES': 'TAARIFA ULIZOANGALIA',
+    'COMMUNITIES': 'JAMII',
+    'My Status': 'Hali yangu',
+    'Sign in to see status updates from your contacts.':
+        'Ingia kuona taarifa za hali kutoka kwa anwani zako.',
+    'No recent updates.': 'Hakuna taarifa mpya.',
+    'Sign in to share status updates.': 'Ingia kushiriki taarifa za hali.',
+    'Communities': 'Jamii',
+    'Refresh updates': 'Onyesha upya taarifa',
+    'STATUS': 'HALI',
+    'Tap to add a status update': 'Gusa kuongeza taarifa ya hali',
+  },
+  'zh': {
+    'Chats': '聊天',
+    'Updates': '动态',
+    'Shop': '商店',
+    'Settings': '设置',
+    'Profile': '个人资料',
+    'ACCOUNT': '账户',
+    'Photo, username and about': '头像、用户名和个人简介',
+    'Account': '账户',
+    'Registration, sign out and data': '注册、退出登录和数据',
+    'DISPLAY': '显示',
+    'Appearance': '外观',
+    'Chat Theme': '聊天主题',
+    'MESSAGING': '消息',
+    'GSM & SMS Protocol': 'GSM 和短信协议',
+    'Manage offline messaging': '管理离线消息',
+    'Notifications': '通知',
+    'Message & call tones': '消息和通话铃声',
+    'Storage and data': '存储和数据',
+    'Chats, media, auto-download': '聊天、媒体和自动下载',
+    'PRIVACY & ACCESS': '隐私与权限',
+    'Privacy': '隐私',
+    'Last seen, profile visibility': '最后上线时间和个人资料可见性',
+    'Accessibility': '无障碍功能',
+    'Text size, motion and display': '文字大小、动态效果和显示',
+    'App language': '应用语言',
+    'Tap to change app language': '点击以更改应用语言',
+    'Invite friend': '邀请好友',
+    'Share AirText with a friend': '与好友分享 AirText',
+    'MORE': '更多',
+    'Help & feedback': '帮助与反馈',
+    'Reports, policy and support': '举报、政策和支持',
+    'LANGUAGE': '语言',
+    'New conversation': '新建聊天',
+    'Close command sphere': '关闭快捷菜单',
+    'Open command sphere': '打开快捷菜单',
+    'More options': '更多选项',
+    'Search or start a new chat': '搜索或开始新聊天',
+    'New message': '新消息',
+    'Contacts': '联系人',
+    'Calls': '通话',
+    'All': '全部',
+    'Unread': '未读',
+    'No chats found': '没有找到聊天',
+    'Marketplace': '应用市场',
+    'Payments are not connected': '尚未连接支付服务',
+    'Wallet': '钱包',
+    'Not connected': '未连接',
+    'Search products and services': '搜索产品和服务',
+    'Browse': '浏览',
+    'Installed': '已安装',
+    'SMS Bots': '短信机器人',
+    'Gateways': '网关',
+    'Templates': '模板',
+    'No products found': '没有找到产品',
+    'No installed services': '没有已安装的服务',
+    'Payments are not configured. No credits were added.': '尚未配置支付，未添加任何余额。',
+    'Payments are not configured. No purchase was made.': '尚未配置支付，未完成任何购买。',
+    'RECENT UPDATES': '最新动态',
+    'VIEWED UPDATES': '已查看的动态',
+    'COMMUNITIES': '社群',
+    'My Status': '我的状态',
+    'Sign in to see status updates from your contacts.': '登录后查看联系人的状态动态。',
+    'No recent updates.': '暂无最新动态。',
+    'Sign in to share status updates.': '登录后分享状态动态。',
+    'Communities': '社群',
+    'Refresh updates': '刷新动态',
+    'STATUS': '状态',
+    'Tap to add a status update': '点击添加状态动态',
+  },
+};
 
-String _newCallRoom() {
-  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  final random = math.Random.secure();
-  final suffix = List.generate(
-    20,
-    (_) => alphabet[random.nextInt(alphabet.length)],
-  ).join();
-  return 'airtext-$suffix';
+String _appCopy(BuildContext context, String english) {
+  final languageCode = Localizations.localeOf(context).languageCode;
+  return _appTranslations[languageCode]?[english] ?? english;
 }
 
-String _callRoomUrl(String room) =>
-    Uri.https('meet.jit.si', '/$room').toString();
+const _reverbHost = String.fromEnvironment(
+  'AIRTEXT_REVERB_HOST',
+  defaultValue: '10.0.2.2',
+);
+const _reverbKey = String.fromEnvironment('AIRTEXT_REVERB_KEY');
+const _reverbPort = int.fromEnvironment(
+  'AIRTEXT_REVERB_PORT',
+  defaultValue: 8080,
+);
+const _reverbUseTls = bool.fromEnvironment('AIRTEXT_REVERB_TLS');
 
-Future<bool> _confirmMeetingStart(
-  BuildContext context, {
-  required String title,
-  required String room,
-}) async {
-  final url = _callRoomUrl(room);
-  return await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text(title),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Share this code or link so others can join:'),
-              const SizedBox(height: 12),
-              SelectableText(room),
-              const SizedBox(height: 6),
-              SelectableText(url, style: Theme.of(context).textTheme.bodySmall),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: url));
-                if (dialogContext.mounted) {
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    const SnackBar(content: Text('Meeting link copied.')),
-                  );
-                }
-              },
-              child: const Text('Copy link'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              icon: const Icon(Icons.video_call_outlined),
-              label: const Text('Start call'),
-            ),
-          ],
-        ),
-      ) ??
-      false;
+Uri? _telephoneUri(String number) {
+  final cleanNumber = number.replaceAll(RegExp(r'[^0-9+*#]'), '');
+  if (cleanNumber.replaceAll(RegExp(r'\D'), '').length < 7) return null;
+  return Uri(scheme: 'tel', path: cleanNumber);
 }
 
-Future<void> _joinCallRoom(
-  BuildContext context, {
-  required String room,
-  required String displayName,
-}) async {
-  try {
-    final response = await JitsiMeet().join(
-      JitsiMeetConferenceOptions(
-        serverURL: 'https://meet.jit.si',
-        room: room,
-        userInfo: JitsiMeetUserInfo(displayName: displayName),
-        configOverrides: const {
-          'prejoinPageEnabled': true,
-          'startWithAudioMuted': false,
-          'startWithVideoMuted': false,
-        },
-        featureFlags: const {
-          FeatureFlags.addPeopleEnabled: true,
-          FeatureFlags.inviteEnabled: true,
-          FeatureFlags.chatEnabled: true,
-        },
-      ),
-    );
-    if (!response.isSuccess && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(response.message ?? 'Could not join the call.')),
-      );
-    }
-  } catch (error) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not start the call: $error')),
-      );
-    }
+String _languageCodeFor(String language) {
+  final normalized = language.trim().toLowerCase();
+  for (final entry in _languageCodes.entries) {
+    if (normalized.startsWith(entry.key.toLowerCase())) return entry.value;
   }
+  return 'en';
+}
+
+Future<bool> _openVoiceCallScreen(
+  BuildContext context,
+  String number, {
+  String contactName = '',
+}) async {
+  final uri = _telephoneUri(number);
+  if (uri == null) return false;
+
+  if (!context.mounted) return false;
+
+  await Navigator.push(
+    context,
+    MaterialPageRoute<void>(
+      builder: (_) => _PhoneCallPage(
+        contactName: contactName.trim().isNotEmpty
+            ? contactName.trim()
+            : 'Contact',
+        phoneNumber: uri.path,
+      ),
+    ),
+  );
+  return true;
 }
 
 enum AirTextLogoStyle { mark, monogram, signal }
 
 class AirTextAppearance extends ChangeNotifier {
+  static const String largeTextKey = 'airtext.accessibility.large-text';
+  static const String reducedMotionKey = 'airtext.accessibility.reduced-motion';
+  static const String highContrastKey = 'airtext.accessibility.high-contrast';
+  static const String appLockKey = 'airtext.security.app-lock';
+  static const String chatLockKey = 'airtext.security.chat-lock';
+  static const String disappearingMessagesKey =
+      'airtext.privacy.disappearing-messages';
+
   ThemeMode themeMode = ThemeMode.system;
+  String language = 'Kiswahili (Tanzania)';
   AirTextLogoStyle logoStyle = AirTextLogoStyle.mark;
   Color chatAccent = _mint;
   Uint8List? chatWallpaper;
+  bool largeText = false;
+  bool reducedMotion = true;
+  bool highContrast = false;
+  bool appLockEnabled = false;
+  bool chatLockEnabled = false;
+  bool disappearingMessagesEnabled = false;
+  bool messageSoundsEnabled = true;
+  bool callSoundsEnabled = true;
+  String messageTone = 'Chime';
+  String callTone = 'Soft echo';
+  bool isLoaded = false;
 
   Future<void> load() async {
     final preferences = await SharedPreferences.getInstance();
+    language =
+        preferences.getString('airtext.language') ?? 'Kiswahili (Tanzania)';
     final themeName = preferences.getString('airtext.appearance.theme');
     themeMode = ThemeMode.values.firstWhere(
       (mode) => mode.name == themeName,
@@ -157,7 +461,29 @@ class AirTextAppearance extends ChangeNotifier {
       'airtext.appearance.chat-wallpaper',
     );
     chatWallpaper = wallpaper == null ? null : base64Decode(wallpaper);
+    largeText = preferences.getBool(largeTextKey) ?? false;
+    reducedMotion = preferences.getBool(reducedMotionKey) ?? true;
+    highContrast = preferences.getBool(highContrastKey) ?? false;
+    appLockEnabled = preferences.getBool(appLockKey) ?? false;
+    chatLockEnabled = preferences.getBool(chatLockKey) ?? false;
+    disappearingMessagesEnabled =
+        preferences.getBool(disappearingMessagesKey) ?? false;
+    messageSoundsEnabled =
+        await NotificationSoundService.isMessageSoundEnabled();
+    callSoundsEnabled = await NotificationSoundService.isCallSoundEnabled();
+    messageTone = await NotificationSoundService.getMessageTone();
+    callTone = await NotificationSoundService.getCallTone();
+    isLoaded = true;
     notifyListeners();
+  }
+
+  Locale get locale => Locale(_languageCodeFor(language));
+
+  Future<void> setLanguage(String value) async {
+    language = value;
+    notifyListeners();
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString('airtext.language', value);
   }
 
   Future<void> setThemeMode(ThemeMode value) async {
@@ -165,6 +491,52 @@ class AirTextAppearance extends ChangeNotifier {
     notifyListeners();
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString('airtext.appearance.theme', value.name);
+  }
+
+  Future<void> setBooleanPreference(String key, bool value) async {
+    switch (key) {
+      case largeTextKey:
+        largeText = value;
+      case reducedMotionKey:
+        reducedMotion = value;
+      case highContrastKey:
+        highContrast = value;
+      case appLockKey:
+        appLockEnabled = value;
+      case chatLockKey:
+        chatLockEnabled = value;
+      case disappearingMessagesKey:
+        disappearingMessagesEnabled = value;
+      default:
+        throw ArgumentError.value(key, 'key', 'Unknown boolean preference');
+    }
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(key, value);
+    notifyListeners();
+  }
+
+  Future<void> setMessageSoundsEnabled(bool value) async {
+    await NotificationSoundService.setMessageSoundEnabled(value);
+    messageSoundsEnabled = value;
+    notifyListeners();
+  }
+
+  Future<void> setCallSoundsEnabled(bool value) async {
+    await NotificationSoundService.setCallSoundEnabled(value);
+    callSoundsEnabled = value;
+    notifyListeners();
+  }
+
+  Future<void> setMessageTone(String value) async {
+    await NotificationSoundService.setMessageTone(value);
+    messageTone = value;
+    notifyListeners();
+  }
+
+  Future<void> setCallTone(String value) async {
+    await NotificationSoundService.setCallTone(value);
+    callTone = value;
+    notifyListeners();
   }
 
   Future<void> setLogoStyle(AirTextLogoStyle value) async {
@@ -255,6 +627,10 @@ class AirTextApi {
 
   bool get isAuthenticated => _token != null;
 
+  Uri get apiBaseUri => _baseUri;
+
+  String? get accessToken => _token;
+
   Future<Map<String, dynamic>> getCurrentUser() => _request('GET', '/me');
 
   Future<void> clearToken() async {
@@ -302,6 +678,192 @@ class AirTextApi {
         ...?name == null ? null : {'name': name},
       },
     );
+    final token = response['token'] as String?;
+    if (token != null) {
+      try {
+        await _tokenStore.writeToken(token);
+      } catch (_) {
+        throw const AirTextApiException(
+          'Could not securely store the sign-in session on this device.',
+          0,
+        );
+      }
+      _token = token;
+    }
+    return response;
+  }
+
+  Future<Map<String, dynamic>> updateProfile(String name) async {
+    final response = await _request('PUT', '/me/profile', body: {'name': name});
+    return response['user'] as Map<String, dynamic>;
+  }
+
+  Future<void> updateProfilePhoto(Uint8List bytes) async {
+    final request =
+        http.MultipartRequest(
+            'POST',
+            _baseUri.replace(path: '${_baseUri.path}/me/profile-photo'),
+          )
+          ..headers['Accept'] = 'application/json'
+          ..files.add(
+            http.MultipartFile.fromBytes(
+              'photo',
+              bytes,
+              filename: 'profile.jpg',
+            ),
+          );
+    if (_token != null) request.headers['Authorization'] = 'Bearer $_token';
+    final response = await http.Response.fromStream(
+      await _client.send(request),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final decoded = response.body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(response.body) as Map<String, dynamic>;
+      throw AirTextApiException(
+        decoded['message'] as String? ?? 'Could not save profile photo.',
+        response.statusCode,
+      );
+    }
+  }
+
+  Future<void> sendPresenceHeartbeat() async {
+    await _request('POST', '/me/presence');
+  }
+
+  Future<Map<String, dynamic>> getUserPreferences() async {
+    final response = await _request('GET', '/me/preferences');
+    return response['preferences'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateSmsGatewayPreferences({
+    Map<String, Object?>? storageSettings,
+    Map<String, Object?>? messagingSettings,
+  }) async {
+    final body = <String, Object?>{};
+    if (storageSettings != null) body['storage_settings'] = storageSettings;
+    if (messagingSettings != null) {
+      body['messaging_settings'] = messagingSettings;
+    }
+    final response = await _request('PUT', '/me/preferences', body: body);
+    return response['preferences'] as Map<String, dynamic>;
+  }
+
+  Future<List<AirTextContact>> getContacts() async {
+    final response = await _request('GET', '/contacts');
+    return (response['data'] as List<dynamic>)
+        .map((item) => AirTextContact.fromApi(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<AirTextContact> createContact({
+    required String name,
+    required String phoneNumber,
+    required String payloadPrefix,
+  }) async {
+    final response = await _request(
+      'POST',
+      '/contacts',
+      body: {
+        'name': name,
+        'phone_number': phoneNumber,
+        'payload_prefix': payloadPrefix,
+      },
+    );
+    return AirTextContact.fromApi(response['data'] as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> getSmsGateway() =>
+      _request('GET', '/me/sms-gateway');
+
+  Future<String> testSmsGateway() async {
+    final response = await _request('POST', '/me/sms-gateway/test');
+    return response['message'] as String? ?? 'Gateway connection verified.';
+  }
+
+  Future<Map<String, dynamic>> getStorageSummary() =>
+      _request('GET', '/me/storage-summary');
+
+  Future<ChatMessage> recordLocalSms({
+    required int conversationId,
+    required String body,
+    required String payloadPrefix,
+  }) async {
+    final response = await _request(
+      'POST',
+      '/conversations/$conversationId/messages/local-sms',
+      body: {'body': body, 'payload_prefix': payloadPrefix},
+    );
+    return ChatMessage.fromApi(response['data'] as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> updateUserPreferences({
+    String? appLanguage,
+    String? lastSeenVisibility,
+    String? profilePictureVisibility,
+    String? aboutVisibility,
+    String? linksVisibility,
+    String? statusVisibility,
+    bool? disappearingMessages,
+  }) async {
+    final body = <String, Object?>{};
+    if (appLanguage != null) body['app_language'] = appLanguage;
+    if (lastSeenVisibility != null) {
+      body['last_seen_visibility'] = lastSeenVisibility;
+    }
+    if (profilePictureVisibility != null) {
+      body['profile_picture_visibility'] = profilePictureVisibility;
+    }
+    if (aboutVisibility != null) body['about_visibility'] = aboutVisibility;
+    if (linksVisibility != null) body['links_visibility'] = linksVisibility;
+    if (statusVisibility != null) body['status_visibility'] = statusVisibility;
+    if (disappearingMessages != null) {
+      body['disappearing_messages'] = disappearingMessages;
+    }
+
+    final response = await _request('PUT', '/me/preferences', body: body);
+    return response['preferences'] as Map<String, dynamic>;
+  }
+
+  Future<void> requestPhoneOtp(String phoneNumber) async {
+    await _request(
+      'POST',
+      '/auth/phone/otp/request',
+      body: {'phone_number': phoneNumber},
+    );
+  }
+
+  Future<void> verifyPhoneOtp({
+    required String phoneNumber,
+    required String code,
+  }) async {
+    final response = await _request(
+      'POST',
+      '/auth/phone/otp/verify',
+      body: {'phone_number': phoneNumber, 'code': code},
+    );
+    final token = response['token'] as String?;
+    if (token == null) return;
+    try {
+      await _tokenStore.writeToken(token);
+    } catch (_) {
+      throw const AirTextApiException(
+        'Could not securely store the sign-in session on this device.',
+        0,
+      );
+    }
+    _token = token;
+  }
+
+  Future<Map<String, dynamic>> verifyPhoneLoginOtp({
+    required String challenge,
+    required String code,
+  }) async {
+    final response = await _request(
+      'POST',
+      '/auth/phone/otp/verify-login',
+      body: {'challenge': challenge, 'code': code},
+    );
     final token = response['token'] as String;
     try {
       await _tokenStore.writeToken(token);
@@ -322,6 +884,15 @@ class AirTextApi {
         .toList();
   }
 
+  Future<int> syncPhoneContacts(List<String> phoneNumbers) async {
+    final response = await _request(
+      'PUT',
+      '/me/contacts',
+      body: {'phone_numbers': phoneNumbers},
+    );
+    return response['matched_contacts'] as int? ?? 0;
+  }
+
   Future<ChatConversation> createConversation({
     String? email,
     String? phoneNumber,
@@ -339,17 +910,246 @@ class AirTextApi {
     return ChatConversation.fromApi(response['data'] as Map<String, dynamic>);
   }
 
-  Future<ChatMessage> sendMessage(int conversationId, String body) async {
+  Future<ChatMessage> sendMessage(
+    int conversationId,
+    String body, {
+    bool viewOnce = false,
+  }) async {
     final response = await _request(
       'POST',
       '/conversations/$conversationId/messages',
-      body: {'body': body},
+      body: {'body': body, 'view_once': viewOnce},
     );
     return ChatMessage.fromApi(response['data'] as Map<String, dynamic>);
   }
 
+  Future<ChatMessage> sendVoiceMessage(
+    int conversationId,
+    String path, {
+    bool viewOnce = false,
+  }) async {
+    final request =
+        http.MultipartRequest(
+            'POST',
+            _baseUri.replace(
+              path: '${_baseUri.path}/conversations/$conversationId/messages',
+            ),
+          )
+          ..headers['Accept'] = 'application/json'
+          ..fields['message_type'] = 'voice'
+          ..fields['view_once'] = viewOnce.toString()
+          ..files.add(await http.MultipartFile.fromPath('media', path));
+    if (_token != null) request.headers['Authorization'] = 'Bearer $_token';
+    final streamed = await _client.send(request);
+    final response = await http.Response.fromStream(streamed);
+    final decoded = response.body.isEmpty
+        ? <String, dynamic>{}
+        : jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw AirTextApiException(
+        decoded['message'] as String? ?? 'Could not send voice message.',
+        response.statusCode,
+      );
+    }
+    return ChatMessage.fromApi(decoded['data'] as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> openViewOnceMessage(
+    int conversationId,
+    int messageId,
+  ) => _request(
+    'POST',
+    '/conversations/$conversationId/messages/$messageId/view-once',
+  );
+
+  Future<String> downloadVoiceMessage(String mediaPath) async {
+    final uri = _baseUri.replace(path: '${_baseUri.path}$mediaPath');
+    final request = http.Request('GET', uri)..headers['Accept'] = 'audio/*';
+    if (_token != null) request.headers['Authorization'] = 'Bearer $_token';
+    final response = await http.Response.fromStream(
+      await _client.send(request),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw AirTextApiException(
+        'This voice message is no longer available.',
+        response.statusCode,
+      );
+    }
+    final directory = await getTemporaryDirectory();
+    final file = File(
+      '${directory.path}/airtext-playback-${DateTime.now().microsecondsSinceEpoch}.wav',
+    );
+    await file.writeAsBytes(response.bodyBytes, flush: true);
+    return file.path;
+  }
+
+  Future<void> setTyping(
+    int conversationId,
+    bool isTyping, {
+    String activity = 'typing',
+  }) async {
+    await _request(
+      'POST',
+      '/conversations/$conversationId/typing',
+      body: {'is_typing': isTyping, 'activity': activity},
+    );
+  }
+
+  Future<String?> getTypingStatus(int conversationId) async {
+    final response = await _request(
+      'GET',
+      '/conversations/$conversationId/typing',
+    );
+    return (response['is_typing'] as bool? ?? false)
+        ? response['activity'] as String?
+        : null;
+  }
+
+  Future<String> translateMessage({
+    required int conversationId,
+    required int messageId,
+    required String targetLanguage,
+  }) async {
+    final response = await _request(
+      'POST',
+      '/conversations/$conversationId/messages/$messageId/translate',
+      body: {'target_language': targetLanguage},
+    );
+    return response['translation'] as String;
+  }
+
   Future<void> markConversationRead(int conversationId) async {
     await _request('POST', '/conversations/$conversationId/read');
+  }
+
+  Future<void> registerPushToken(
+    String token,
+    String platform, {
+    String messageTone = 'Chime',
+  }) async {
+    await _request(
+      'POST',
+      '/device-tokens',
+      body: {'token': token, 'platform': platform, 'message_tone': messageTone},
+    );
+  }
+
+  Future<void> removePushToken(String token) async {
+    await _request('DELETE', '/device-tokens', body: {'token': token});
+  }
+
+  Future<Map<String, dynamic>> createGroupCall(List<int> participantIds) async {
+    final response = await _request(
+      'POST',
+      '/group-calls',
+      body: {'participant_ids': participantIds},
+    );
+    return response['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getGroupCallToken(String callId) async {
+    final response = await _request('GET', '/group-calls/$callId/token');
+    return response['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> acceptGroupCall(String callId) async {
+    final response = await _request('POST', '/group-calls/$callId/accept');
+    return response['data'] as Map<String, dynamic>;
+  }
+
+  Future<void> declineGroupCall(String callId) async {
+    await _request('POST', '/group-calls/$callId/decline');
+  }
+
+  Future<void> leaveGroupCall(String callId) async {
+    await _request('POST', '/group-calls/$callId/leave');
+  }
+
+  Future<List<Map<String, dynamic>>> getActiveGroupCalls() async {
+    final response = await _request('GET', '/group-calls/active');
+    return (response['data'] as List<dynamic>)
+        .map((call) => Map<String, dynamic>.from(call as Map))
+        .toList();
+  }
+
+  Future<List<_StatusUpdate>> _getStatuses() async {
+    final response = await _request('GET', '/statuses');
+    return (response['data'] as List<dynamic>)
+        .map((item) => _StatusUpdate.fromApi(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<_StatusUpdate> _createTextStatus(
+    String text, {
+    bool viewOnce = false,
+  }) async {
+    final response = await _request(
+      'POST',
+      '/statuses',
+      body: {'body': text, 'view_once': viewOnce, 'screenshot_protected': true},
+    );
+    return _StatusUpdate.fromApi(response['data'] as Map<String, dynamic>);
+  }
+
+  Future<_StatusUpdate> _createPhotoStatus(
+    XFile photo, {
+    bool viewOnce = false,
+  }) async {
+    final uri = _baseUri.replace(path: '${_baseUri.path}/statuses');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers['Accept'] = 'application/json'
+      ..fields['view_once'] = viewOnce.toString()
+      ..fields['screenshot_protected'] = 'true'
+      ..files.add(await http.MultipartFile.fromPath('media', photo.path));
+    if (_token != null) {
+      request.headers['Authorization'] = 'Bearer $_token';
+    }
+
+    try {
+      final streamed = await _client.send(request);
+      final response = await http.Response.fromStream(streamed);
+      final decoded = response.body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(response.body) as Map<String, dynamic>;
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw AirTextApiException(
+          decoded['message'] as String? ?? 'Could not publish the status.',
+          response.statusCode,
+        );
+      }
+      return _StatusUpdate.fromApi(decoded['data'] as Map<String, dynamic>);
+    } on AirTextApiException {
+      debugPrint('Conversation activity update failed.');
+      rethrow;
+    } on http.ClientException {
+      throw const AirTextApiException('Could not reach the Air app server.', 0);
+    }
+  }
+
+  Future<void> _markStatusViewed(int statusId) async {
+    await _request('POST', '/statuses/$statusId/view');
+  }
+
+  Future<List<Map<String, dynamic>>> getStatusViewers(int statusId) async {
+    final response = await _request('GET', '/statuses/$statusId/viewers');
+    return (response['data'] as List<dynamic>)
+        .map((viewer) => Map<String, dynamic>.from(viewer as Map))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getStatusLikers(int statusId) async {
+    final response = await _request('GET', '/statuses/$statusId/likes');
+    return (response['data'] as List<dynamic>)
+        .map((liker) => Map<String, dynamic>.from(liker as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> likeStatus(int statusId) async {
+    return _request('POST', '/statuses/$statusId/like');
+  }
+
+  Future<Map<String, dynamic>> unlikeStatus(int statusId) async {
+    return _request('DELETE', '/statuses/$statusId/like');
   }
 
   Future<void> logout() async {
@@ -362,14 +1162,25 @@ class AirTextApi {
     }
   }
 
+  Future<void> deleteAccount() async {
+    await _request('DELETE', '/me');
+    await clearToken();
+  }
+
   Future<Map<String, dynamic>> _request(
     String method,
     String path, {
     Map<String, Object?>? body,
   }) async {
     final uri = _baseUri.replace(path: '${_baseUri.path}$path');
+    final savedLanguage = (await SharedPreferences.getInstance()).getString(
+      'airtext.language',
+    );
     final headers = <String, String>{
       'Accept': 'application/json',
+      'Accept-Language': _languageCodeFor(
+        savedLanguage ?? 'Kiswahili (Tanzania)',
+      ),
       ...?body == null ? null : {'Content-Type': 'application/json'},
       ...?_token == null ? null : {'Authorization': 'Bearer $_token'},
     };
@@ -390,7 +1201,7 @@ class AirTextApi {
             decoded['message'] as String? ??
             (firstError is List && firstError.isNotEmpty
                 ? firstError.first as String
-              : 'Air app request failed (${response.statusCode}).');
+                : 'Air app request failed (${response.statusCode}).');
         throw AirTextApiException(message, response.statusCode);
       }
       return decoded;
@@ -443,11 +1254,24 @@ class _AirTextAppState extends State<AirTextApp> {
       builder: (context, _) => MaterialApp(
         title: 'Air app',
         debugShowCheckedModeBanner: false,
-        theme: _buildTheme(Brightness.light),
-        darkTheme: _buildTheme(Brightness.dark),
+        locale: _appearance.locale,
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+        ],
+        supportedLocales: AppLocalizations.supportedLocales,
+        theme: _buildTheme(Brightness.light, _appearance.highContrast),
+        darkTheme: _buildTheme(Brightness.dark, _appearance.highContrast),
         themeMode: _appearance.themeMode,
         builder: (context, child) {
           final brightness = Theme.of(context).brightness;
+          final mediaQuery = MediaQuery.of(context);
+          final systemScale = mediaQuery.textScaler.scale(1.0);
+          final requestedScale = _appearance.largeText && systemScale < 1.3
+              ? 1.3
+              : systemScale;
           return CupertinoTheme(
             data: CupertinoThemeData(
               brightness: brightness,
@@ -456,7 +1280,14 @@ class _AirTextAppState extends State<AirTextApp> {
                   ? _obsidian
                   : _paper,
             ),
-            child: child ?? const SizedBox.shrink(),
+            child: MediaQuery(
+              data: mediaQuery.copyWith(
+                textScaler: TextScaler.linear(requestedScale),
+                disableAnimations: _appearance.reducedMotion,
+                highContrast: _appearance.highContrast,
+              ),
+              child: child ?? const SizedBox.shrink(),
+            ),
           );
         },
         home: ChatsPage(
@@ -467,17 +1298,22 @@ class _AirTextAppState extends State<AirTextApp> {
     );
   }
 
-  ThemeData _buildTheme(Brightness brightness) {
+  ThemeData _buildTheme(Brightness brightness, bool highContrast) {
     final isDark = brightness == Brightness.dark;
+    final colorScheme = highContrast
+        ? (isDark
+              ? const ColorScheme.highContrastDark()
+              : const ColorScheme.highContrastLight())
+        : ColorScheme.fromSeed(
+            seedColor: isDark ? _mint : _green,
+            brightness: brightness,
+            surface: isDark ? _obsidian : _lightPanel,
+          );
     return ThemeData(
       platform: TargetPlatform.iOS,
       useMaterial3: true,
       brightness: brightness,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: isDark ? _mint : _green,
-        brightness: brightness,
-        surface: isDark ? _obsidian : _lightPanel,
-      ),
+      colorScheme: colorScheme,
       scaffoldBackgroundColor: isDark ? _obsidian : _paper,
       appBarTheme: AppBarTheme(
         backgroundColor: isDark ? _obsidian : _lightPanel,
@@ -519,6 +1355,8 @@ class AirTextLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (style == AirTextLogoStyle.mark) return AuthBrandMark(size: size);
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: size,
@@ -529,10 +1367,7 @@ class AirTextLogo extends StatelessWidget {
         borderRadius: BorderRadius.circular(size * 0.28),
       ),
       child: switch (style) {
-        AirTextLogoStyle.mark => CustomPaint(
-          size: Size.square(size),
-          painter: const _AirTextMarkPainter(),
-        ),
+        AirTextLogoStyle.mark => const SizedBox.shrink(),
         AirTextLogoStyle.monogram => Text(
           'A',
           style: TextStyle(
@@ -551,75 +1386,37 @@ class AirTextLogo extends StatelessWidget {
   }
 }
 
-class _AirTextMarkPainter extends CustomPainter {
-  const _AirTextMarkPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.save();
-    canvas.scale(size.width / 38, size.height / 38);
-
-    final bubblePaint = Paint()..color = Colors.white;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        const Rect.fromLTWH(6, 7, 26, 20),
-        const Radius.circular(5),
-      ),
-      bubblePaint,
-    );
-    canvas.drawPath(
-      Path()
-        ..moveTo(10, 24)
-        ..lineTo(8, 32)
-        ..lineTo(18, 26)
-        ..close(),
-      bubblePaint,
-    );
-
-    final inkPaint = Paint()
-      ..color = const Color(0xFF123B50)
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(const Offset(12, 13), const Offset(26, 13), inkPaint);
-    canvas.drawLine(const Offset(12, 19), const Offset(21, 19), inkPaint);
-
-    final signalPaint = Paint()
-      ..color = const Color(0xFFFFBE55)
-      ..strokeWidth = 2.4
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..style = PaintingStyle.stroke;
-    canvas.drawPath(
-      Path()
-        ..moveTo(20, 25)
-        ..lineTo(23, 22)
-        ..lineTo(26, 25)
-        ..lineTo(30, 20),
-      signalPaint,
-    );
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
 class ChatMessage {
   ChatMessage(
     this.text,
     this.time, {
     this.isMine = false,
+    this.sentAt,
     this.expiresAt,
     this.reaction,
     this.status = 'sent',
+    this.backendId,
+    this.messageType = 'text',
+    this.mediaUrl,
+    this.viewOnce = false,
+    this.viewOncePending = false,
+    this.viewedAt,
   });
 
-  final String text;
+  String text;
   final String time;
   final bool isMine;
+  final DateTime? sentAt;
   final DateTime? expiresAt;
   String? reaction;
   String status;
+  final int? backendId;
+  final String messageType;
+  String? mediaUrl;
+  final bool viewOnce;
+  bool viewOncePending;
+  DateTime? viewedAt;
+  String? translation;
 
   factory ChatMessage.fromApi(Map<String, dynamic> json) {
     final timestamp = DateTime.tryParse(json['sent_at'] as String? ?? '');
@@ -627,7 +1424,16 @@ class ChatMessage {
       json['body'] as String? ?? '',
       timestamp == null ? 'Now' : _formatMessageTime(timestamp.toLocal()),
       isMine: json['is_mine'] as bool? ?? false,
+      sentAt: timestamp?.toLocal(),
       status: json['status'] as String? ?? 'sent',
+      backendId: json['id'] as int?,
+      messageType: json['message_type'] as String? ?? 'text',
+      mediaUrl: json['media_url'] as String?,
+      viewOnce: json['view_once'] as bool? ?? false,
+      viewOncePending: json['view_once_pending'] as bool? ?? false,
+      viewedAt: DateTime.tryParse(json['viewed_at'] as String? ?? ''),
+      expiresAt: DateTime.tryParse(json['expires_at'] as String? ?? '')
+          ?.toLocal(),
     );
   }
 }
@@ -650,11 +1456,16 @@ class ChatConversation {
     this.backendId,
     this.recipientEmail,
     this.isSmsRoute = false,
+    this.payloadPrefix = 'MSG:',
+    this.counterpartUserId,
+    this.profilePhotoUrl,
+    this.isOnline = false,
+    this.lastSeenAt,
   });
 
   final String name;
   final String initials;
-  final String status;
+  String status;
   final String time;
   int unread;
   final Color color;
@@ -666,8 +1477,13 @@ class ChatConversation {
   bool shareLastSeen;
   bool readReceipts;
   final int? backendId;
+  final int? counterpartUserId;
   final String? recipientEmail;
   final bool isSmsRoute;
+  final String payloadPrefix;
+  final String? profilePhotoUrl;
+  bool isOnline;
+  DateTime? lastSeenAt;
 
   String get preview => messages.isEmpty ? '' : messages.last.text;
 
@@ -677,6 +1493,9 @@ class ChatConversation {
         .toList();
     final name = json['name'] as String? ?? 'Air app contact';
     final isSms = json['route'] == 'sms';
+    final isOnline = json['is_online'] as bool? ?? false;
+    final lastSeen = DateTime.tryParse(json['last_seen_at'] as String? ?? '')
+        ?.toLocal();
     return ChatConversation(
       name: name,
       initials: name
@@ -685,15 +1504,26 @@ class ChatConversation {
           .take(2)
           .map((part) => part[0].toUpperCase())
           .join(),
-      status: isSms ? 'SMS contact' : 'Air app contact',
+      status: isSms
+          ? 'SMS contact'
+          : isOnline
+          ? 'Online'
+          : lastSeen == null
+          ? 'Air app contact'
+          : 'Last seen ${_formatMessageTime(lastSeen)}',
       time: messages.isEmpty ? 'New' : messages.last.time,
       unread: json['unread_count'] as int? ?? 0,
       color: const Color(0xFF26372F),
       messages: messages,
       phoneNumber: json['phone_number'] as String? ?? '',
       backendId: json['id'] as int?,
+      counterpartUserId: json['counterpart_user_id'] as int?,
+      profilePhotoUrl: json['profile_photo_url'] as String?,
+      isOnline: json['is_online'] as bool? ?? false,
+      lastSeenAt: DateTime.tryParse(json['last_seen_at'] as String? ?? ''),
       recipientEmail: json['email'] as String?,
       isSmsRoute: isSms,
+      payloadPrefix: json['payload_prefix'] as String? ?? 'MSG:',
     );
   }
 }
@@ -702,6 +1532,21 @@ String _formatMessageTime(DateTime time) {
   final hour = time.hour % 12 == 0 ? 12 : time.hour % 12;
   final minute = time.minute.toString().padLeft(2, '0');
   return '$hour:$minute ${time.hour >= 12 ? 'PM' : 'AM'}';
+}
+
+bool _isSameChatDay(DateTime first, DateTime second) =>
+    first.year == second.year &&
+    first.month == second.month &&
+    first.day == second.day;
+
+String _chatDateLabel(BuildContext context, DateTime date) {
+  final localDate = date.toLocal();
+  final today = DateTime.now();
+  if (_isSameChatDay(localDate, today)) return 'Today';
+  if (_isSameChatDay(localDate, today.subtract(const Duration(days: 1)))) {
+    return 'Yesterday';
+  }
+  return MaterialLocalizations.of(context).formatMediumDate(localDate);
 }
 
 class ChatsPage extends StatefulWidget {
@@ -714,10 +1559,24 @@ class ChatsPage extends StatefulWidget {
   State<ChatsPage> createState() => _ChatsPageState();
 }
 
-class _ChatsPageState extends State<ChatsPage> {
+class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   final _searchController = TextEditingController();
   late final AirTextApi _api = widget.api;
   Timer? _conversationSyncTimer;
+  AirTextCallClient? _callClient;
+  StreamSubscription<AirTextCallSignal>? _callSignalSubscription;
+  StreamSubscription<int>? _messageUpdateSubscription;
+  StreamSubscription<String>? _pushTokenSubscription;
+  StreamSubscription<RemoteMessage>? _pushOpenSubscription;
+  StreamSubscription<RemoteMessage>? _foregroundMessageSubscription;
+  String? _incomingCallDialogId;
+  bool _pushSetupComplete = false;
+  bool _appLocked = false;
+  bool _chatLocked = false;
+  bool _authenticationInProgress = false;
+  bool _initialLockStateHandled = false;
+  bool _hasLoadedRemoteConversations = false;
+  final Set<int> _playedIncomingMessageIds = {};
   final List<ChatConversation> _conversations = [
     ChatConversation(
       name: 'Mariam Hassan',
@@ -770,6 +1629,8 @@ class _ChatsPageState extends State<ChatsPage> {
   String _filter = 'All';
   int _selectedTab = 0;
   bool _commandExpanded = false;
+  bool _sessionRestored = false;
+  bool _signedOutLocked = false;
   List<AirTextContact> _contacts = [
     AirTextContact(
       name: 'Mariam Hassan',
@@ -796,10 +1657,14 @@ class _ChatsPageState extends State<ChatsPage> {
   String _username = '@airapp';
   String _about = 'Available';
   Uint8List? _profileImage;
+  String? _profilePhotoUrl;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    widget.appearance.addListener(_onAppearanceChanged);
+    _onAppearanceChanged();
     _loadSavedContacts();
     _loadSavedProfile();
     _restoreRemoteSession();
@@ -807,31 +1672,149 @@ class _ChatsPageState extends State<ChatsPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.appearance.removeListener(_onAppearanceChanged);
     _searchController.dispose();
     _conversationSyncTimer?.cancel();
+    unawaited(_stopCallSignaling());
+    unawaited(_stopPushNotifications());
+    unawaited(NotificationSoundService.stopCallSound());
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused && !_authenticationInProgress) {
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        unawaited(DynamicAppIconFlutterPlus.applyPendingIcon());
+      }
+      if (widget.appearance.appLockEnabled) _appLocked = true;
+      if (_selectedTab == 0 && widget.appearance.chatLockEnabled) {
+        _chatLocked = true;
+      }
+      unawaited(NotificationSoundService.stopCallSound());
+      if (mounted) setState(() {});
+    } else if (state == AppLifecycleState.resumed) {
+      if (_api.isAuthenticated) unawaited(_sendPresenceHeartbeatSafely());
+      if (_appLocked) unawaited(_authenticateAppLock());
+    }
+  }
+
+  void _onAppearanceChanged() {
+    if (!widget.appearance.isLoaded) return;
+    if (!_initialLockStateHandled) {
+      _initialLockStateHandled = true;
+      if (widget.appearance.appLockEnabled) {
+        _appLocked = true;
+        unawaited(_authenticateAppLock());
+      }
+      _chatLocked = widget.appearance.chatLockEnabled;
+      if (mounted) setState(() {});
+      return;
+    }
+
+    if (!widget.appearance.appLockEnabled) _appLocked = false;
+    if (widget.appearance.chatLockEnabled) _chatLocked = true;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _authenticateAppLock() async {
+    if (_authenticationInProgress) return;
+    _authenticationInProgress = true;
+    final authenticated = await AppLockService.authenticateUser();
+    _authenticationInProgress = false;
+    if (!mounted) return;
+    setState(() => _appLocked = !authenticated);
+  }
+
+  Future<bool> _authenticateChatLock() async {
+    final authenticated = await AppLockService.authenticateUser();
+    if (authenticated && mounted) setState(() => _chatLocked = false);
+    return authenticated;
   }
 
   Future<void> _restoreRemoteSession() async {
     await _api.restoreToken();
-    if (!_api.isAuthenticated) return;
-    try {
-      final user = await _api.getCurrentUser();
-      await _loadRemoteConversations();
+    if (!_api.isAuthenticated) {
       if (!mounted) return;
       setState(() {
+        _signedOutLocked = true;
+        _sessionRestored = true;
+      });
+      return;
+    }
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool('airtext.onboarding-complete', true);
+    try {
+      final user = await _api.getCurrentUser();
+      await preferences.setString('airtext.account', jsonEncode(user));
+      await _loadRemoteConversations();
+      if (!mounted) return;
+      await preferences.remove('airtext.signed-out');
+      setState(() {
+        _signedOutLocked = false;
+        _sessionRestored = true;
         _displayName = user['name'] as String? ?? _displayName;
         _username = user['email'] as String? ?? _username;
+        _profilePhotoUrl = user['profile_photo_url'] as String?;
       });
       _startConversationSync();
+      await _startCallSignaling(user['id'] as int);
     } on AirTextApiException catch (error) {
-      if (error.statusCode == 401) await _api.clearToken();
+      if (error.statusCode == 401) {
+        await _api.clearToken();
+        await preferences.setBool('airtext.signed-out', true);
+        if (mounted) {
+          setState(() {
+            _signedOutLocked = true;
+            _sessionRestored = true;
+          });
+        }
+      } else {
+        final cachedAccountJson = preferences.getString('airtext.account');
+        Map<String, dynamic>? cachedAccount;
+        if (cachedAccountJson != null) {
+          try {
+            final decoded = jsonDecode(cachedAccountJson);
+            if (decoded is Map<String, dynamic>) cachedAccount = decoded;
+          } on FormatException {
+            await preferences.remove('airtext.account');
+          }
+        }
+        if (!mounted) return;
+        setState(() {
+          _signedOutLocked = false;
+          _sessionRestored = true;
+          _displayName = cachedAccount?['name'] as String? ?? _displayName;
+          _username = cachedAccount?['email'] as String? ?? _username;
+        });
+        _startConversationSync();
+      }
     }
   }
 
   Future<void> _loadRemoteConversations() async {
     final conversations = await _api.getConversations();
     if (!mounted) return;
+    final previousMessageIds = _conversations
+        .expand((conversation) => conversation.messages)
+        .map((message) => message.backendId)
+        .whereType<int>()
+        .toSet();
+    if (_hasLoadedRemoteConversations) {
+      for (final conversation in conversations) {
+        for (final message in conversation.messages) {
+          final messageId = message.backendId;
+          if (!message.isMine &&
+              messageId != null &&
+              !previousMessageIds.contains(messageId) &&
+              _playedIncomingMessageIds.add(messageId)) {
+            unawaited(NotificationSoundService.playMessageSound());
+          }
+        }
+      }
+    }
+    _hasLoadedRemoteConversations = true;
     setState(() {
       _conversations
         ..clear()
@@ -839,12 +1822,25 @@ class _ChatsPageState extends State<ChatsPage> {
     });
   }
 
+  Future<void> _refreshConversationsFromRealtime() async {
+    try {
+      await _loadRemoteConversations();
+    } on AirTextApiException catch (error) {
+      if (error.statusCode == 401) {
+        _conversationSyncTimer?.cancel();
+        await _api.clearToken();
+      }
+    }
+  }
+
   void _startConversationSync() {
     _conversationSyncTimer?.cancel();
+    unawaited(_sendPresenceHeartbeatSafely());
     _conversationSyncTimer = Timer.periodic(const Duration(seconds: 15), (
       _,
     ) async {
       try {
+        await _sendPresenceHeartbeatSafely();
         await _loadRemoteConversations();
       } on AirTextApiException catch (error) {
         if (error.statusCode == 401) {
@@ -855,27 +1851,357 @@ class _ChatsPageState extends State<ChatsPage> {
     });
   }
 
+  Future<void> _sendPresenceHeartbeatSafely() async {
+    try {
+      await _api.sendPresenceHeartbeat();
+    } on AirTextApiException {
+      debugPrint('Presence heartbeat unavailable.');
+    }
+  }
+
+  Future<void> _startCallSignaling(int userId) async {
+    await _stopCallSignaling();
+    await _startPushNotifications();
+
+    final token = _api.accessToken;
+    if (token == null || _reverbKey.isEmpty) return;
+
+    final client = AirTextCallClient(
+      apiBaseUri: _api.apiBaseUri,
+      token: token,
+      reverbHost: _reverbHost,
+      reverbKey: _reverbKey,
+      reverbPort: _reverbPort,
+      useTls: _reverbUseTls,
+    );
+    _callClient = client;
+    _callSignalSubscription = client.signals.listen((signal) {
+      if (signal.kind == 'incoming') {
+        unawaited(
+          _showIncomingCall(
+            signal.callId,
+            signal.payload['caller_name'] as String? ?? 'AirText contact',
+          ),
+        );
+      }
+    });
+    _messageUpdateSubscription = client.messageUpdates.listen((_) {
+      unawaited(_refreshConversationsFromRealtime());
+    });
+
+    try {
+      await client.connect(userId);
+      final response = await client.getActiveCall();
+      final activeCall = response['data'];
+      if (activeCall is Map<String, dynamic>) {
+        unawaited(
+          _showIncomingCall(
+            activeCall['id'] as String,
+            activeCall['caller_name'] as String? ?? 'AirText contact',
+          ),
+        );
+      }
+    } catch (_) {
+      await _callSignalSubscription?.cancel();
+      _callSignalSubscription = null;
+      await _messageUpdateSubscription?.cancel();
+      _messageUpdateSubscription = null;
+      await client.dispose();
+      if (identical(_callClient, client)) _callClient = null;
+    }
+  }
+
+  Future<void> _startPushNotifications() async {
+    if (_pushSetupComplete) return;
+    final options = airTextFirebaseOptions;
+    if (options == null) return;
+
+    try {
+      if (Firebase.apps.isEmpty) await Firebase.initializeApp(options: options);
+      await _localNotifications.initialize(
+        settings: const InitializationSettings(
+          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+          iOS: DarwinInitializationSettings(),
+        ),
+        onDidReceiveNotificationResponse: (_) {
+          if (!mounted) return;
+          setState(() => _selectedTab = 0);
+          unawaited(_refreshConversationsFromRealtime());
+        },
+      );
+      FirebaseMessaging.onBackgroundMessage(
+        _firebaseMessagingBackgroundHandler,
+      );
+      final messaging = FirebaseMessaging.instance;
+      await messaging.requestPermission(alert: true, badge: true, sound: true);
+      final token = await messaging.getToken();
+      if (token != null) await _registerPushToken(token);
+      _pushTokenSubscription = messaging.onTokenRefresh.listen(
+        (token) => unawaited(_registerPushToken(token)),
+      );
+      _pushOpenSubscription = FirebaseMessaging.onMessageOpenedApp.listen(
+        (message) => unawaited(_recoverCallFromPush(message)),
+      );
+      _foregroundMessageSubscription = FirebaseMessaging.onMessage.listen(
+        (message) => unawaited(_showForegroundMessage(message)),
+      );
+      final initialMessage = await messaging.getInitialMessage();
+      if (initialMessage != null) {
+        unawaited(_recoverCallFromPush(initialMessage));
+      }
+      _pushSetupComplete = true;
+    } catch (_) {
+      _pushSetupComplete = false;
+    }
+  }
+
+  Future<void> _showForegroundMessage(RemoteMessage message) async {
+    if (message.data['type'] != 'message') return;
+    final title = message.notification?.title ?? 'New AirText message';
+    final body = message.notification?.body ?? 'You received a new message.';
+    final tone = await NotificationSoundService.getMessageTone();
+    final soundName = switch (tone) {
+      'Modern ping' => 'airtext_modern_ping',
+      'Soft echo' => 'airtext_soft_echo',
+      _ => 'airtext_chime',
+    };
+
+    await _localNotifications.show(
+      id: message.hashCode,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          'airtext_foreground_messages',
+          'Messages',
+          channelDescription: 'Notifications for incoming AirText messages',
+          importance: Importance.high,
+          priority: Priority.high,
+          playSound: await NotificationSoundService.isMessageSoundEnabled(),
+          sound: RawResourceAndroidNotificationSound(soundName),
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: await NotificationSoundService.isMessageSoundEnabled(),
+        ),
+      ),
+      payload: message.data['conversation_id'] as String?,
+    );
+  }
+
+  Future<void> _registerPushToken(String token) async {
+    final platform = switch (defaultTargetPlatform) {
+      TargetPlatform.android => 'android',
+      TargetPlatform.iOS => 'ios',
+      _ => null,
+    };
+    if (platform == null || !_api.isAuthenticated) return;
+    try {
+      await _api.registerPushToken(
+        token,
+        platform,
+        messageTone: await NotificationSoundService.getMessageTone(),
+      );
+    } on AirTextApiException {
+      // Push registration is optional until a Firebase project is configured.
+    }
+  }
+
+  Future<void> _stopPushNotifications() async {
+    await _pushTokenSubscription?.cancel();
+    _pushTokenSubscription = null;
+    await _pushOpenSubscription?.cancel();
+    _pushOpenSubscription = null;
+    await _foregroundMessageSubscription?.cancel();
+    _foregroundMessageSubscription = null;
+    _pushSetupComplete = false;
+
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token != null && _api.isAuthenticated) {
+        await _api.removePushToken(token);
+      }
+    } catch (_) {
+      // Firebase is optional until a project is configured for this build.
+    }
+  }
+
+  Future<void> _recoverCallFromPush(RemoteMessage message) async {
+    if (message.data['type'] == 'message') {
+      await _refreshConversationsFromRealtime();
+      return;
+    }
+    if (message.data['type'] != 'direct_call') return;
+    final callId = message.data['call_id'] as String?;
+    final client = _callClient;
+    if (callId == null || client == null) return;
+
+    try {
+      final response = await client.getActiveCall();
+      final call = response['data'];
+      if (call is Map<String, dynamic> && call['id'] == callId) {
+        await _showIncomingCall(
+          callId,
+          call['caller_name'] as String? ?? 'AirText contact',
+        );
+      }
+    } on AirTextCallClientException {
+      // The active-call sync will retry when the Reverb connection is ready.
+    }
+  }
+
+  Future<void> _stopCallSignaling() async {
+    _incomingCallDialogId = null;
+    await _callSignalSubscription?.cancel();
+    _callSignalSubscription = null;
+    await _messageUpdateSubscription?.cancel();
+    _messageUpdateSubscription = null;
+    final client = _callClient;
+    _callClient = null;
+    await client?.dispose();
+  }
+
+  Future<void> _showIncomingCall(String callId, String callerName) async {
+    if (!mounted || _incomingCallDialogId == callId) return;
+    _incomingCallDialogId = callId;
+    unawaited(NotificationSoundService.startCallSound());
+
+    final answer = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Incoming AirText video call'),
+        content: Text('$callerName is calling.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Decline'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.video_call_rounded),
+            label: const Text('Answer'),
+          ),
+        ],
+      ),
+    );
+    await NotificationSoundService.stopCallSound();
+    _incomingCallDialogId = null;
+    if (!mounted) return;
+
+    final client = _callClient;
+    if (client == null) return;
+
+    try {
+      if (answer == true) {
+        await client.acceptCall(callId);
+        if (!mounted) return;
+        await Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => ActiveVideoCallScreen(
+              callClient: client,
+              callId: callId,
+              contactName: callerName,
+              isCaller: false,
+              startMuted: false,
+              startCameraOff: false,
+            ),
+          ),
+        );
+      } else if (answer == false) {
+        await client.declineCall(callId);
+      }
+    } on AirTextCallClientException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
+  }
+
   Future<void> _onApiAuthenticated(Map<String, dynamic> user) async {
-    await _loadRemoteConversations();
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString('airtext.account', jsonEncode(user));
+    await preferences.remove('airtext.signed-out');
+    try {
+      await _loadRemoteConversations();
+    } on AirTextApiException catch (error) {
+      if (error.statusCode == 401) {
+        await _api.clearToken();
+        rethrow;
+      }
+    }
     if (!mounted) return;
     setState(() {
+      _signedOutLocked = false;
+      _sessionRestored = true;
       _displayName = user['name'] as String? ?? _displayName;
       _username = user['email'] as String? ?? _username;
     });
     _startConversationSync();
+    await _startCallSignaling(user['id'] as int);
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.appearance.isLoaded) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (!_sessionRestored) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_signedOutLocked) {
+      return Scaffold(
+        body: WelcomeScreen(
+          language: widget.appearance.language,
+          onChooseLanguage: () => unawaited(_chooseAppLanguage()),
+          continueLabel: 'Sign in or create account',
+          onContinue: () => unawaited(_openAccount()),
+        ),
+      );
+    }
+    if (_appLocked) {
+      return Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_outline, size: 42),
+                const SizedBox(height: 14),
+                const Text('Air app is locked'),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: () => unawaited(_authenticateAppLock()),
+                  icon: const Icon(Icons.fingerprint),
+                  label: const Text('Unlock with biometrics'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       body: SafeArea(
         child: IndexedStack(
           index: _selectedTab,
           children: [
-            _buildChats(),
-            const _UpdatesPage(),
+            _chatLocked && widget.appearance.chatLockEnabled
+                ? Center(
+                    child: FilledButton.icon(
+                      onPressed: () => unawaited(_authenticateChatLock()),
+                      icon: const Icon(Icons.fingerprint),
+                      label: const Text('Unlock chats'),
+                    ),
+                  )
+                : _buildChats(),
+            _UpdatesPage(api: _api, displayName: _displayName),
             const _AirTextShopPage(),
             _SettingsPage(
+              api: _api,
               appearance: widget.appearance,
               onOpenProfile: () => setState(() => _selectedTab = 4),
               onOpenAccount: _openAccount,
@@ -886,6 +2212,7 @@ class _ChatsPageState extends State<ChatsPage> {
               username: _username,
               about: _about,
               imageBytes: _profileImage,
+              imageUrl: _profilePhotoUrl,
               onSave: _saveProfile,
               onOpenAccount: _openAccount,
             ),
@@ -894,7 +2221,18 @@ class _ChatsPageState extends State<ChatsPage> {
       ),
       bottomNavigationBar: _FloatingNavigationDock(
         selectedIndex: _selectedTab,
-        onSelected: (index) => setState(() => _selectedTab = index),
+        onSelected: (index) async {
+          if (index == 0 && widget.appearance.chatLockEnabled && _chatLocked) {
+            if (!await _authenticateChatLock()) return;
+          }
+          if (!mounted) return;
+          setState(() {
+            if (index != 0 && widget.appearance.chatLockEnabled) {
+              _chatLocked = true;
+            }
+            _selectedTab = index;
+          });
+        },
       ),
     );
   }
@@ -925,7 +2263,7 @@ class _ChatsPageState extends State<ChatsPage> {
               children: [
                 Expanded(
                   child: Text(
-                    'Chats',
+                    _appCopy(context, 'Chats'),
                     style: TextStyle(
                       color: textColor,
                       fontSize: 24,
@@ -934,14 +2272,14 @@ class _ChatsPageState extends State<ChatsPage> {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'New conversation',
+                  tooltip: _appCopy(context, 'New conversation'),
                   onPressed: _startNewConversation,
                   icon: Icon(Icons.add, color: mutedColor),
                 ),
                 IconButton(
                   tooltip: _commandExpanded
-                      ? 'Close command sphere'
-                      : 'Open command sphere',
+                      ? _appCopy(context, 'Close command sphere')
+                      : _appCopy(context, 'Open command sphere'),
                   onPressed: () =>
                       setState(() => _commandExpanded = !_commandExpanded),
                   icon: Icon(
@@ -950,7 +2288,7 @@ class _ChatsPageState extends State<ChatsPage> {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'More options',
+                  tooltip: _appCopy(context, 'More options'),
                   onPressed: _showChatActions,
                   icon: Icon(CupertinoIcons.ellipsis, color: mutedColor),
                 ),
@@ -964,7 +2302,7 @@ class _ChatsPageState extends State<ChatsPage> {
               onChanged: (_) => setState(() {}),
               style: TextStyle(color: textColor, fontSize: 14),
               decoration: InputDecoration(
-                hintText: 'Search or start a new chat',
+                hintText: _appCopy(context, 'Search or start a new chat'),
                 hintStyle: TextStyle(color: mutedColor, fontSize: 13),
                 prefixIcon: Icon(Icons.search, color: mutedColor, size: 20),
                 filled: true,
@@ -991,19 +2329,19 @@ class _ChatsPageState extends State<ChatsPage> {
                       children: [
                         _NexusAction(
                           icon: Icons.edit_square,
-                          label: 'New message',
+                          label: _appCopy(context, 'New message'),
                           onTap: _startNewConversation,
                         ),
                         const SizedBox(width: 8),
                         _NexusAction(
                           icon: CupertinoIcons.person_2,
-                          label: 'Contacts',
+                          label: _appCopy(context, 'Contacts'),
                           onTap: _openContacts,
                         ),
                         const SizedBox(width: 8),
                         _NexusAction(
                           icon: CupertinoIcons.phone,
-                          label: 'Calls',
+                          label: _appCopy(context, 'Calls'),
                           onTap: _openCalls,
                         ),
                       ],
@@ -1019,7 +2357,7 @@ class _ChatsPageState extends State<ChatsPage> {
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ChoiceChip(
-                      label: Text(filter),
+                      label: Text(_appCopy(context, filter)),
                       selected: _filter == filter,
                       onSelected: (_) => setState(() => _filter = filter),
                       showCheckmark: false,
@@ -1050,7 +2388,7 @@ class _ChatsPageState extends State<ChatsPage> {
             child: visibleConversations.isEmpty
                 ? Center(
                     child: Text(
-                      'No chats found',
+                      _appCopy(context, 'No chats found'),
                       style: TextStyle(color: mutedColor),
                     ),
                   )
@@ -1079,6 +2417,7 @@ class _ChatsPageState extends State<ChatsPage> {
           api: _api,
           appearance: widget.appearance,
           displayName: _displayName,
+          callClient: _callClient,
           onMessageSent: () => setState(() {}),
         ),
       ),
@@ -1086,6 +2425,7 @@ class _ChatsPageState extends State<ChatsPage> {
   }
 
   Future<void> _openAppearance() async {
+    if (!mounted) return;
     await Navigator.of(context).push<void>(
       CupertinoPageRoute<void>(
         builder: (_) => _AppearancePage(
@@ -1110,63 +2450,10 @@ class _ChatsPageState extends State<ChatsPage> {
       return;
     }
 
-    final emailController = TextEditingController();
-    final phoneController = TextEditingController();
-    final nameController = TextEditingController();
     final details = await showDialog<Map<String, String>>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('New conversation'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: emailController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: 'Air app account email',
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('or'),
-              ),
-              TextField(
-                controller: phoneController,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: 'SMS number (+country code)',
-                ),
-              ),
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Contact name (optional)',
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, {
-              'email': emailController.text.trim(),
-              'phone': phoneController.text.trim(),
-              'name': nameController.text.trim(),
-            }),
-            child: const Text('Create'),
-          ),
-        ],
-      ),
+      builder: (_) => const _NewConversationDialog(),
     );
-    emailController.dispose();
-    phoneController.dispose();
-    nameController.dispose();
     if (details == null || !mounted) return;
 
     final email = details['email']!;
@@ -1233,6 +2520,14 @@ class _ChatsPageState extends State<ChatsPage> {
     String about,
     Uint8List? imageBytes,
   ) async {
+    if (_api.isAuthenticated) {
+      try {
+        await _api.updateProfile(displayName);
+      } on AirTextApiException catch (error) {
+        if (error.statusCode != 403) rethrow;
+      }
+      if (imageBytes != null) await _api.updateProfilePhoto(imageBytes);
+    }
     setState(() {
       _displayName = displayName;
       _username = username;
@@ -1256,25 +2551,71 @@ class _ChatsPageState extends State<ChatsPage> {
       CupertinoPageRoute<void>(
         builder: (_) => _AccountPage(
           api: _api,
+          appearance: widget.appearance,
           onAuthenticated: _onApiAuthenticated,
+          onSaveProfile: (name, email, imageBytes) =>
+              _saveProfile(name, email, _about, imageBytes),
           onSignOut: _signOutLocally,
           onDeleteLocalData: _deleteLocalData,
+          onDeleteAccount: _deleteAccount,
         ),
       ),
     );
   }
 
+  Future<void> _chooseAppLanguage() async {
+    final selected = await Navigator.of(context).push<String>(
+      CupertinoPageRoute<String>(
+        builder: (_) => LanguageSelectorScreen(api: _api),
+      ),
+    );
+    if (selected != null && selected.isNotEmpty) {
+      await widget.appearance.setLanguage(selected);
+    }
+  }
+
   Future<void> _signOutLocally() async {
+    await _stopPushNotifications();
     try {
       await _api.logout();
     } on AirTextApiException {
       await _api.clearToken();
     }
     _conversationSyncTimer?.cancel();
+    await _stopCallSignaling();
     final preferences = await SharedPreferences.getInstance();
-    await preferences.remove('airtext.profile');
+    await preferences.setBool('airtext.signed-out', true);
     if (!mounted) return;
     setState(() {
+      _signedOutLocked = true;
+      _sessionRestored = true;
+      _selectedTab = 0;
+      _conversations
+        ..clear()
+        ..addAll(_offlineConversations);
+    });
+    Navigator.of(context).pop();
+  }
+
+  Future<void> _deleteLocalData() async {
+    await _stopPushNotifications();
+    try {
+      await _api.logout();
+    } on AirTextApiException {
+      await _api.clearToken();
+    }
+    _conversationSyncTimer?.cancel();
+    await _stopCallSignaling();
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove('airtext.profile');
+    await preferences.remove('airtext.account');
+    await preferences.remove('airtext.contacts');
+    await preferences.setBool('airtext.signed-out', true);
+    if (!mounted) return;
+    setState(() {
+      _signedOutLocked = true;
+      _sessionRestored = true;
+      _contacts = [];
       _displayName = 'Air app User';
       _username = '@airapp';
       _about = 'Available';
@@ -1287,18 +2628,29 @@ class _ChatsPageState extends State<ChatsPage> {
     Navigator.of(context).pop();
   }
 
-  Future<void> _deleteLocalData() async {
+  Future<void> _deleteAccount() async {
+    await _stopPushNotifications();
     try {
-      await _api.logout();
-    } on AirTextApiException {
-      await _api.clearToken();
+      await _api.deleteAccount();
+    } on AirTextApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+      return;
     }
+
     _conversationSyncTimer?.cancel();
+    await _stopCallSignaling();
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove('airtext.profile');
+    await preferences.remove('airtext.account');
     await preferences.remove('airtext.contacts');
+    await preferences.setBool('airtext.signed-out', true);
     if (!mounted) return;
     setState(() {
+      _signedOutLocked = true;
+      _sessionRestored = true;
       _contacts = [];
       _displayName = 'Air app User';
       _username = '@airapp';
@@ -1321,53 +2673,83 @@ class _ChatsPageState extends State<ChatsPage> {
   }
 
   Future<void> _openContacts() async {
+    if (_api.isAuthenticated) {
+      try {
+        final remoteContacts = await _api.getContacts();
+        if (!mounted) return;
+        final contactsByNumber = {
+          for (final contact in _contacts) contact.phoneNumber: contact,
+          for (final contact in remoteContacts)
+            contact.phoneNumber: contact,
+        };
+        setState(() => _contacts = contactsByNumber.values.toList());
+        await _saveContacts();
+      } on AirTextApiException catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not load synced contacts: ${error.message}')),
+        );
+      }
+    }
+    if (!mounted) return;
     await Navigator.of(context).push<void>(
       CupertinoPageRoute<void>(
         builder: (_) => _ContactsPage(
+          api: _api,
           contacts: _contacts,
           onContactSaved: (contact) {
             setState(() => _contacts = [..._contacts, contact]);
             _saveContacts();
           },
-          onOpenChat: (contact) {
-            final existing = _conversations
-                .cast<ChatConversation?>()
-                .firstWhere(
-                  (conversation) =>
-                      conversation?.phoneNumber == contact.phoneNumber,
-                  orElse: () => null,
-                );
-            final conversation =
-                existing ??
-                ChatConversation(
-                  name: contact.name,
-                  initials: contact.initials,
-                  status: contact.isAirTextUser
-                      ? 'Air app contact'
-                      : 'SMS contact',
-                  time: 'New',
-                  unread: 0,
-                  color: const Color(0xFFDCE8F8),
-                  phoneNumber: contact.phoneNumber,
-                  messages: [],
-                );
-            if (existing == null) {
-              _conversations.add(conversation);
-            }
-            Navigator.of(context).pop();
-            _openConversation(conversation);
-          },
+          onOpenChat: (contact) => unawaited(_openContactChat(contact)),
         ),
       ),
     );
   }
 
-  Future<void> _openCalls() async {
-    await Navigator.of(context).push<void>(
-      CupertinoPageRoute<void>(
-        builder: (_) => _CallsPage(displayName: _displayName),
-      ),
+  Future<void> _openContactChat(AirTextContact contact) async {
+    final existing = _conversations
+        .cast<ChatConversation?>()
+        .firstWhere(
+          (conversation) => conversation?.phoneNumber == contact.phoneNumber,
+          orElse: () => null,
+        );
+    var conversation = existing;
+    if (_api.isAuthenticated && existing?.backendId == null) {
+      try {
+        conversation = await _api.createConversation(
+          phoneNumber: contact.phoneNumber,
+          name: contact.name,
+        );
+      } on AirTextApiException catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not start chat: ${error.message}')),
+          );
+        }
+        return;
+      }
+    }
+    conversation ??= ChatConversation(
+      name: contact.name,
+      initials: contact.initials,
+      status: contact.isAirTextUser ? 'Air app contact' : 'SMS contact',
+      time: 'New',
+      unread: 0,
+      color: const Color(0xFFDCE8F8),
+      phoneNumber: contact.phoneNumber,
+                  payloadPrefix: contact.payloadPrefix,
+      messages: [],
     );
+    if (existing == null) _conversations.add(conversation);
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    _openConversation(conversation);
+  }
+
+  Future<void> _openCalls() async {
+    await Navigator.of(context)
+        .push<void>(CupertinoPageRoute<void>(builder: (_) => _CallsPage()));
   }
 
   Future<void> _showChatActions() async {
@@ -1493,7 +2875,7 @@ class _NewGroupPageState extends State<_NewGroupPage> {
               padding: const EdgeInsets.all(13),
             ),
           ),
-          const Padding(
+          Padding(
             padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
             child: _ListSectionLabel('ADD PARTICIPANTS'),
           ),
@@ -1666,16 +3048,91 @@ class _LinkDevicePage extends StatelessWidget {
   }
 }
 
+class _NewConversationDialog extends StatefulWidget {
+  const _NewConversationDialog();
+
+  @override
+  State<_NewConversationDialog> createState() => _NewConversationDialogState();
+}
+
+class _NewConversationDialogState extends State<_NewConversationDialog> {
+  final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _nameController = TextEditingController();
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _phoneController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('New conversation'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: 'Air app account email',
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('or'),
+          ),
+          TextField(
+            controller: _phoneController,
+            keyboardType: TextInputType.phone,
+            decoration: const InputDecoration(
+              labelText: 'SMS number (+country code)',
+            ),
+          ),
+          TextField(
+            controller: _nameController,
+            decoration: const InputDecoration(
+              labelText: 'Contact name (optional)',
+            ),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, {
+          'email': _emailController.text.trim(),
+          'phone': _phoneController.text.trim(),
+          'name': _nameController.text.trim(),
+        }),
+        child: const Text('Create'),
+      ),
+    ],
+  );
+}
+
 class AirTextContact {
   const AirTextContact({
     required this.name,
     required this.phoneNumber,
     required this.isAirTextUser,
+    this.payloadPrefix = 'MSG:',
+    this.backendId,
   });
 
   final String name;
   final String phoneNumber;
   final bool isAirTextUser;
+  final String payloadPrefix;
+  final int? backendId;
 
   String get initials => name
       .trim()
@@ -1689,22 +3146,36 @@ class AirTextContact {
     'name': name,
     'phoneNumber': phoneNumber,
     'isAirTextUser': isAirTextUser,
+    'payloadPrefix': payloadPrefix,
+    'backendId': backendId,
   };
 
   factory AirTextContact.fromJson(Map<String, dynamic> json) => AirTextContact(
     name: json['name'] as String,
     phoneNumber: json['phoneNumber'] as String,
     isAirTextUser: json['isAirTextUser'] as bool? ?? false,
+    payloadPrefix: json['payloadPrefix'] as String? ?? 'MSG:',
+    backendId: json['backendId'] as int?,
+  );
+
+  factory AirTextContact.fromApi(Map<String, dynamic> json) => AirTextContact(
+    name: json['name'] as String,
+    phoneNumber: json['phone_number'] as String,
+    isAirTextUser: json['is_registered'] as bool? ?? false,
+    payloadPrefix: json['payload_prefix'] as String? ?? 'MSG:',
+    backendId: json['id'] as int?,
   );
 }
 
 class _ContactsPage extends StatefulWidget {
   const _ContactsPage({
+    required this.api,
     required this.contacts,
     required this.onContactSaved,
     required this.onOpenChat,
   });
 
+  final AirTextApi api;
   final List<AirTextContact> contacts;
   final ValueChanged<AirTextContact> onContactSaved;
   final ValueChanged<AirTextContact> onOpenChat;
@@ -1716,6 +3187,7 @@ class _ContactsPage extends StatefulWidget {
 class _ContactsPageState extends State<_ContactsPage> {
   final _searchController = TextEditingController();
   String _filter = 'All';
+  bool _syncingPhoneContacts = false;
 
   @override
   void dispose() {
@@ -1743,6 +3215,16 @@ class _ContactsPageState extends State<_ContactsPage> {
         leading: const BackButton(),
         title: const Text('Contacts'),
         actions: [
+          IconButton(
+            tooltip: 'Sync phone contacts',
+            onPressed: _syncingPhoneContacts ? null : _syncPhoneContacts,
+            icon: _syncingPhoneContacts
+                ? const SizedBox.square(
+                    dimension: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(CupertinoIcons.person_crop_circle_badge_checkmark),
+          ),
           IconButton(
             tooltip: 'Add contact',
             onPressed: _addContact,
@@ -1848,56 +3330,108 @@ class _ContactsPageState extends State<_ContactsPage> {
     );
   }
 
-  Future<void> _addContact() async {
-    final nameController = TextEditingController();
-    final phoneController = TextEditingController();
-    final contact = await showCupertinoDialog<AirTextContact>(
-      context: context,
-      builder: (context) => CupertinoAlertDialog(
-        title: const Text('New contact'),
-        content: Column(
-          children: [
-            const SizedBox(height: 12),
-            CupertinoTextField(controller: nameController, placeholder: 'Name'),
-            const SizedBox(height: 8),
-            CupertinoTextField(
-              controller: phoneController,
-              placeholder: '+255712345678',
-              keyboardType: TextInputType.phone,
+  Future<void> _syncPhoneContacts() async {
+    if (!widget.api.isAuthenticated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sign in to sync phone contacts.')),
+      );
+      return;
+    }
+
+    setState(() => _syncingPhoneContacts = true);
+    try {
+      final permission = await FlutterContacts.permissions.request(
+        PermissionType.read,
+      );
+      if (permission != PermissionStatus.granted &&
+          permission != PermissionStatus.limited) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Contact access was not allowed.')),
+          );
+        }
+        return;
+      }
+
+      final contacts = await FlutterContacts.getAll(
+        properties: {ContactProperty.phone},
+      );
+      final phoneNumbers = <String>{};
+      for (final contact in contacts) {
+        for (final phone in contact.phones) {
+          final number = _toE164(phone.normalizedNumber ?? phone.number);
+          if (number != null) phoneNumbers.add(number);
+        }
+      }
+      if (contacts.isNotEmpty && phoneNumbers.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'No international phone numbers found; existing synced contacts were kept.',
+              ),
             ),
-          ],
-        ),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          CupertinoDialogAction(
-            isDefaultAction: true,
-            onPressed: () {
-              final name = nameController.text.trim();
-              final phone = phoneController.text.trim();
-              if (name.isEmpty ||
-                  phone.replaceAll(RegExp(r'\D'), '').length < 7) {
-                return;
-              }
-              Navigator.pop(
-                context,
-                AirTextContact(
-                  name: name,
-                  phoneNumber: phone,
-                  isAirTextUser: false,
-                ),
-              );
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+          );
+        }
+        return;
+      }
+
+      final matched = await widget.api.syncPhoneContacts(phoneNumbers.toList());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$matched AirText contacts synced.')),
+        );
+      }
+    } on Exception catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not sync contacts: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _syncingPhoneContacts = false);
+    }
+  }
+
+  String? _toE164(String value) {
+    final normalized = value.replaceAll(RegExp(r'[\s().-]'), '');
+    return RegExp(r'^\+[1-9]\d{7,14}$').hasMatch(normalized)
+        ? normalized
+        : null;
+  }
+
+  Future<void> _addContact() async {
+    final values = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (_) => const _NewContactDialog(),
     );
-    nameController.dispose();
-    phoneController.dispose();
-    if (contact == null || !mounted) return;
+    if (values == null || !mounted) return;
+
+    final contactName = [values['first_name'], values['last_name']]
+        .where((part) => part != null && part.isNotEmpty)
+        .join(' ');
+    var contact = AirTextContact(
+      name: contactName,
+      phoneNumber: values['phone']!,
+      isAirTextUser: false,
+      payloadPrefix: values['payload_prefix']!,
+    );
+    if (widget.api.isAuthenticated) {
+      try {
+        contact = await widget.api.createContact(
+          name: contactName,
+          phoneNumber: contact.phoneNumber,
+          payloadPrefix: contact.payloadPrefix,
+        );
+      } on AirTextApiException catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save contact: ${error.message}')),
+        );
+        return;
+      }
+    }
+    if (!mounted) return;
     widget.onContactSaved(contact);
   }
 
@@ -1918,6 +3452,103 @@ class _ContactsPageState extends State<_ContactsPage> {
   }
 }
 
+class _NewContactDialog extends StatefulWidget {
+  const _NewContactDialog();
+
+  @override
+  State<_NewContactDialog> createState() => _NewContactDialogState();
+}
+
+class _NewContactDialogState extends State<_NewContactDialog> {
+  final _firstNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  String _payloadPrefix = 'MSG:';
+
+  @override
+  void dispose() {
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('New contact'),
+    content: Form(
+      key: _formKey,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextFormField(
+            controller: _firstNameController,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'First name'),
+            validator: (value) => value == null || value.trim().isEmpty
+                ? 'Enter a first name'
+                : null,
+          ),
+          TextFormField(
+            controller: _lastNameController,
+            decoration: const InputDecoration(labelText: 'Last name'),
+          ),
+          TextFormField(
+            controller: _phoneController,
+            keyboardType: TextInputType.phone,
+            decoration: const InputDecoration(
+              labelText: 'GSM phone number',
+              hintText: '+255712884102',
+            ),
+            validator: (value) => value == null ||
+                    !RegExp(r'^\+[1-9]\d{7,14}$').hasMatch(
+                      value.replaceAll(RegExp(r'[\s().-]'), ''),
+                    )
+                ? 'Use an international number, e.g. +255712884102'
+                : null,
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: _payloadPrefix,
+            decoration: const InputDecoration(
+              labelText: 'Default payload prefix',
+            ),
+            items: const [
+              DropdownMenuItem(value: 'MSG:', child: Text('MSG:')),
+              DropdownMenuItem(value: 'STAT:', child: Text('STAT:')),
+              DropdownMenuItem(value: 'ACK:', child: Text('ACK:')),
+            ],
+            onChanged: (value) {
+              if (value != null) setState(() => _payloadPrefix = value);
+            },
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () {
+          if (!_formKey.currentState!.validate()) return;
+          Navigator.pop(context, {
+            'first_name': _firstNameController.text.trim(),
+            'last_name': _lastNameController.text.trim(),
+            'phone': _phoneController.text
+                .trim()
+                .replaceAll(RegExp(r'[\s().-]'), ''),
+            'payload_prefix': _payloadPrefix,
+          });
+        },
+        child: const Text('Save contact'),
+      ),
+    ],
+  );
+}
+
 class _ConversationTile extends StatelessWidget {
   const _ConversationTile({required this.conversation, required this.onTap});
 
@@ -1926,7 +3557,7 @@ class _ConversationTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isAirTextRoute = conversation.status == 'Air app contact';
+    final isAirTextRoute = !conversation.isSmsRoute;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final titleColor = isDark ? Colors.white : _ink;
     final mutedColor = isDark ? _silver : _lightMuted;
@@ -2083,6 +3714,7 @@ class ChatDetailPage extends StatefulWidget {
     required this.api,
     required this.appearance,
     required this.displayName,
+    required this.callClient,
     required this.onMessageSent,
     super.key,
   });
@@ -2091,6 +3723,7 @@ class ChatDetailPage extends StatefulWidget {
   final AirTextApi api;
   final AirTextAppearance appearance;
   final String displayName;
+  final AirTextCallClient? callClient;
   final VoidCallback onMessageSent;
 
   @override
@@ -2099,9 +3732,18 @@ class ChatDetailPage extends StatefulWidget {
 
 class _ChatDetailPageState extends State<ChatDetailPage> {
   final _messageController = TextEditingController();
+  final AudioRecorder _voiceRecorder = AudioRecorder();
   Timer? _expiryTimer;
   Timer? _syncTimer;
+  Timer? _typingTimer;
+  Timer? _typingLeaseTimer;
   bool _showEmojiPicker = false;
+  bool _viewOnceMessage = false;
+  bool _smsFallbackEnabled = true;
+  bool _globalReadReceipts = true;
+  bool _isRecordingVoice = false;
+  String? _voiceRecordingPath;
+  String? _counterpartActivity;
   late String _disappearingDuration;
   late bool _blocked;
   late bool _reported;
@@ -2111,11 +3753,13 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   @override
   void initState() {
     super.initState();
+    unawaited(_setScreenPrivacy(true));
     _disappearingDuration = widget.conversation.disappearingDuration;
     _blocked = widget.conversation.isBlocked;
     _reported = widget.conversation.isReported;
     _shareLastSeen = widget.conversation.shareLastSeen;
     _readReceipts = widget.conversation.readReceipts;
+    unawaited(_loadSmsFallbackPreference());
     _expiryTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       final messageCount = widget.conversation.messages.length;
       widget.conversation.messages.removeWhere(
@@ -2127,11 +3771,41 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       }
     });
     if (widget.api.isAuthenticated && widget.conversation.backendId != null) {
-      _markConversationRead();
       _syncTimer = Timer.periodic(
         const Duration(seconds: 15),
         (_) => _syncRemoteConversation(),
       );
+      _typingTimer = Timer.periodic(
+        const Duration(seconds: 1),
+        (_) => _pollTypingActivity(),
+      );
+    }
+  }
+
+  Future<void> _loadSmsFallbackPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    var enabled = prefs.getBool('sms_fallback_enabled') ?? true;
+    var readReceiptsEnabled = prefs.getBool('sms_delivery_receipts') ?? true;
+    if (widget.api.isAuthenticated) {
+      try {
+        final preferences = await widget.api.getUserPreferences();
+        final messaging = preferences['messaging_settings'];
+        if (messaging is Map<String, dynamic>) {
+          enabled = messaging['sms_fallback_enabled'] as bool? ?? enabled;
+          readReceiptsEnabled =
+              messaging['delivery_receipts'] as bool? ?? readReceiptsEnabled;
+        }
+      } on AirTextApiException {
+        // Use the last saved device preferences while offline.
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _smsFallbackEnabled = enabled;
+      _globalReadReceipts = readReceiptsEnabled;
+    });
+    if (readReceiptsEnabled && widget.api.isAuthenticated) {
+      await _markConversationRead();
     }
   }
 
@@ -2139,13 +3813,18 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
   void dispose() {
     _expiryTimer?.cancel();
     _syncTimer?.cancel();
+    _typingTimer?.cancel();
+    _typingLeaseTimer?.cancel();
+    if (_isRecordingVoice) unawaited(_voiceRecorder.cancel());
+    unawaited(_voiceRecorder.dispose());
+    unawaited(_setScreenPrivacy(false));
     _messageController.dispose();
     super.dispose();
   }
 
   Future<void> _markConversationRead() async {
     final backendId = widget.conversation.backendId;
-    if (backendId == null) return;
+    if (backendId == null || !_readReceipts || !_globalReadReceipts) return;
 
     try {
       await widget.api.markConversationRead(backendId);
@@ -2164,16 +3843,136 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     }
   }
 
+  void _onComposerChanged(String value) {
+    setState(() {});
+    if (value.trim().isEmpty) {
+      unawaited(_publishConversationActivity(false));
+      return;
+    }
+    unawaited(_publishConversationActivity(true));
+  }
+
+  Future<void> _publishConversationActivity(
+    bool active, {
+    String activity = 'typing',
+  }) async {
+    final conversationId = widget.conversation.backendId;
+    if (conversationId == null || !widget.api.isAuthenticated) return;
+    _typingLeaseTimer?.cancel();
+    try {
+      await widget.api.setTyping(conversationId, active, activity: activity);
+    } on AirTextApiException {
+      return;
+    }
+    if (active) {
+      _typingLeaseTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+        unawaited(_publishConversationActivity(true, activity: activity));
+      });
+    }
+  }
+
+  Future<void> _pollTypingActivity() async {
+    final conversationId = widget.conversation.backendId;
+    if (conversationId == null || !widget.api.isAuthenticated) return;
+    try {
+      final activity = await widget.api.getTypingStatus(conversationId);
+      if (!mounted || activity == _counterpartActivity) return;
+      setState(() => _counterpartActivity = activity);
+    } on AirTextApiException {
+      debugPrint('Typing activity poll failed.');
+    }
+  }
+
+  Future<void> _toggleVoiceRecording() async {
+    final conversationId = widget.conversation.backendId;
+    if (!widget.api.isAuthenticated || conversationId == null) {
+      await _showUnavailableFeature(
+        'Voice messages',
+        'Sign in to send voice messages in Air app chats.',
+      );
+      return;
+    }
+    if (widget.conversation.isSmsRoute) {
+      await _showUnavailableFeature(
+        'Voice messages',
+        'Voice messages are available only in Air app conversations.',
+      );
+      return;
+    }
+
+    if (!_isRecordingVoice) {
+      if (!await _voiceRecorder.hasPermission()) return;
+      final directory = await getTemporaryDirectory();
+      final path =
+          '${directory.path}/airtext-${DateTime.now().microsecondsSinceEpoch}.wav';
+      try {
+        await _voiceRecorder.start(
+          const RecordConfig(encoder: AudioEncoder.wav),
+          path: path,
+        );
+        _voiceRecordingPath = path;
+        if (!mounted) return;
+        setState(() => _isRecordingVoice = true);
+        await _publishConversationActivity(true, activity: 'recording');
+      } on PlatformException catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(error.message ?? 'Could not start recording.'),
+            ),
+          );
+        }
+      }
+      return;
+    }
+
+    final path = await _voiceRecorder.stop() ?? _voiceRecordingPath;
+    _voiceRecordingPath = null;
+    if (mounted) setState(() => _isRecordingVoice = false);
+    await _publishConversationActivity(false);
+    if (path == null || !File(path).existsSync()) return;
+    try {
+      final message = await widget.api.sendVoiceMessage(
+        conversationId,
+        path,
+        viewOnce: _viewOnceMessage,
+      );
+      if (!mounted) return;
+      setState(() {
+        widget.conversation.messages.add(message);
+        _viewOnceMessage = false;
+      });
+      widget.onMessageSent();
+    } on AirTextApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } finally {
+      try {
+        await File(path).delete();
+      } on FileSystemException {
+        debugPrint('Temporary voice cleanup failed.');
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final conversation = widget.conversation;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isAirTextRoute = conversation.status == 'Air app contact';
-    final canvasColor = isDark ? _obsidian : _paper;
-    final panelColor = isDark ? _panel : _lightPanel;
-    final borderColor = isDark ? _line : _lightBorder;
-    final primaryText = isDark ? Colors.white : _ink;
-    final mutedText = isDark ? _silver : _lightMuted;
+    final canvasColor = isDark
+      ? const Color(0xFF0B141A)
+      : const Color(0xFFEFEAE2);
+    final panelColor = isDark
+      ? const Color(0xFF202C33)
+        : const Color(0xFFFFFFFF);
+    final borderColor = isDark
+      ? const Color(0xFF2B3A42)
+      : const Color(0xFFE9EDEF);
+    final primaryText = isDark ? const Color(0xFFF5F7FA) : _ink;
+    final mutedText = isDark ? const Color(0xFF8D9EAF) : _lightMuted;
     final routeColor = isAirTextRoute
         ? widget.appearance.chatAccent
         : (isDark ? const Color(0xFFD9B77A) : const Color(0xFF805A18));
@@ -2219,7 +4018,11 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                     ),
                   ),
                   Text(
-                    conversation.status,
+                    _counterpartActivity == 'recording'
+                        ? 'Recording audio…'
+                        : _counterpartActivity == 'typing'
+                        ? 'Typing…'
+                        : conversation.status,
                     style: TextStyle(color: mutedText, fontSize: 10),
                   ),
                 ],
@@ -2323,31 +4126,50 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
               child: ListView.builder(
                 physics: const BouncingScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-                itemCount: conversation.messages.length + 1,
+                itemCount: conversation.messages.length,
                 itemBuilder: (context, index) {
-                  if (index == 0) {
-                    return Center(
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 14),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 5,
+                  final message = conversation.messages[index];
+                  final previous = index == 0
+                      ? null
+                      : conversation.messages[index - 1].sentAt;
+                  final sentAt = message.sentAt;
+                  final showDate =
+                      index == 0 ||
+                      (sentAt != null &&
+                          (previous == null ||
+                              !_isSameChatDay(sentAt, previous)));
+                  return Column(
+                    children: [
+                      if (showDate)
+                        Center(
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 14),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: panelColor,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text(
+                              sentAt == null
+                                  ? 'Today'
+                                  : _chatDateLabel(context, sentAt),
+                              style: TextStyle(color: mutedText, fontSize: 11),
+                            ),
+                          ),
                         ),
-                        decoration: BoxDecoration(
-                          color: panelColor,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          'Today',
-                          style: TextStyle(color: mutedText, fontSize: 11),
-                        ),
+                      _MessageBubble(
+                        message: message,
+                        api: widget.api,
+                        conversationId: conversation.backendId,
+                        isAirTextRoute: isAirTextRoute,
+                        accentColor: widget.appearance.chatAccent,
+                        onTranslate: () => _translateMessage(message),
+                        onMessageChanged: widget.onMessageSent,
                       ),
-                    );
-                  }
-                  return _MessageBubble(
-                    message: conversation.messages[index - 1],
-                    isAirTextRoute: isAirTextRoute,
-                    accentColor: widget.appearance.chatAccent,
+                    ],
                   );
                 },
               ),
@@ -2408,6 +4230,28 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                         ),
                       ),
                     ),
+                    if (isAirTextRoute)
+                      Tooltip(
+                        message: _viewOnceMessage
+                            ? 'Turn off view once'
+                            : 'Send view once',
+                        child: CupertinoButton(
+                          padding: const EdgeInsets.all(7),
+                          minimumSize: Size.zero,
+                          onPressed: _blocked
+                              ? null
+                              : () => setState(
+                                  () => _viewOnceMessage = !_viewOnceMessage,
+                                ),
+                          child: Icon(
+                            CupertinoIcons.eye,
+                            color: _viewOnceMessage
+                                ? widget.appearance.chatAccent
+                                : mutedText,
+                            size: 20,
+                          ),
+                        ),
+                      ),
                     Expanded(
                       child: CupertinoTextField(
                         controller: _messageController,
@@ -2427,7 +4271,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                         ),
                         style: TextStyle(color: primaryText, fontSize: 16),
                         placeholderStyle: TextStyle(color: mutedText),
-                        onChanged: (_) => setState(() {}),
+                        onChanged: _onComposerChanged,
                       ),
                     ),
                     AnimatedSwitcher(
@@ -2438,15 +4282,23 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
                           ScaleTransition(scale: animation, child: child),
                       child: _messageController.text.trim().isEmpty
                           ? Tooltip(
-                              message: 'Record voice message',
+                              message: _isRecordingVoice
+                                  ? 'Stop and send voice message'
+                                  : 'Record voice message',
                               child: CupertinoButton(
                                 key: const ValueKey('voice'),
                                 padding: const EdgeInsets.all(8),
                                 minimumSize: Size.zero,
-                                onPressed: _showVoiceUnavailable,
+                                onPressed: _blocked
+                                    ? null
+                                    : _toggleVoiceRecording,
                                 child: Icon(
-                                  CupertinoIcons.mic_fill,
-                                  color: widget.appearance.chatAccent,
+                                  _isRecordingVoice
+                                      ? CupertinoIcons.stop_circle_fill
+                                      : CupertinoIcons.mic_fill,
+                                  color: _isRecordingVoice
+                                      ? const Color(0xFFCC3A3A)
+                                      : widget.appearance.chatAccent,
                                   size: 21,
                                 ),
                               ),
@@ -2478,25 +4330,67 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     );
   }
 
+  Future<void> _translateMessage(ChatMessage message) async {
+    final conversationId = widget.conversation.backendId;
+    final messageId = message.backendId;
+    if (!widget.api.isAuthenticated ||
+        conversationId == null ||
+        messageId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Only synced messages can be translated.'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      final translation = await widget.api.translateMessage(
+        conversationId: conversationId,
+        messageId: messageId,
+        targetLanguage: _languageCodeFor(widget.appearance.language),
+      );
+      if (!mounted) return;
+      setState(() => message.translation = translation);
+    } on AirTextApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
+  }
+
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty || _blocked) return;
 
+    if (widget.conversation.isSmsRoute && _smsFallbackEnabled) {
+      await _sendSmsThroughSim(text);
+      return;
+    }
+
     final backendId = widget.conversation.backendId;
     if (widget.api.isAuthenticated && backendId != null) {
       try {
-        final message = await widget.api.sendMessage(backendId, text);
+        final message = await widget.api.sendMessage(
+          backendId,
+          text,
+          viewOnce: _viewOnceMessage,
+        );
         if (!mounted) return;
         setState(() {
           widget.conversation.messages.add(message);
           _messageController.clear();
           _showEmojiPicker = false;
+          _viewOnceMessage = false;
         });
+        await _publishConversationActivity(false);
         widget.onMessageSent();
       } on AirTextApiException catch (error) {
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(error.message)));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(error.message)),
+          );
         }
       }
       return;
@@ -2515,6 +4409,7 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
           text,
           'Now',
           isMine: true,
+          sentAt: DateTime.now(),
           expiresAt: duration == null ? null : DateTime.now().add(duration),
         ),
       );
@@ -2522,6 +4417,67 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     });
     setState(() => _showEmojiPicker = false);
     widget.onMessageSent();
+  }
+
+  Future<void> _sendSmsThroughSim(String text) async {
+    final phoneNumber = widget.conversation.phoneNumber;
+    if (phoneNumber.isEmpty) return;
+    final prefix = widget.conversation.payloadPrefix;
+    final smsBody = prefix == 'MSG:' ? text : '$prefix$text';
+
+    try {
+      final result = await SmsFallbackService.sendSms(
+        phoneNumber: phoneNumber,
+        message: smsBody,
+      );
+      if (result == SmsDispatchResult.composerOpened) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('SMS draft opened. Confirm sending in your SMS app.'),
+            ),
+          );
+        }
+        return;
+      }
+
+      ChatMessage message = ChatMessage(
+        text,
+        _formatMessageTime(DateTime.now()),
+        isMine: true,
+        sentAt: DateTime.now(),
+        status: 'sent',
+      );
+      final backendId = widget.conversation.backendId;
+      if (widget.api.isAuthenticated && backendId != null) {
+        try {
+          message = await widget.api.recordLocalSms(
+            conversationId: backendId,
+            body: text,
+            payloadPrefix: prefix,
+          );
+        } on AirTextApiException catch (error) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('SMS sent; chat history sync failed: ${error.message}')),
+            );
+          }
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        widget.conversation.messages.add(message);
+        _messageController.clear();
+        _showEmojiPicker = false;
+      });
+      widget.onMessageSent();
+    } on PlatformException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message ?? 'Could not send SMS through this SIM.')),
+        );
+      }
+    }
   }
 
   Future<void> _syncRemoteConversation() async {
@@ -2535,6 +4491,9 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       );
       if (remote == null || !mounted) return;
       setState(() {
+        widget.conversation.status = remote.status;
+        widget.conversation.isOnline = remote.isOnline;
+        widget.conversation.lastSeenAt = remote.lastSeenAt;
         widget.conversation.messages
           ..clear()
           ..addAll(remote.messages);
@@ -2556,25 +4515,69 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
       );
       return;
     }
-    await Navigator.of(context).push<void>(
-      CupertinoPageRoute<void>(
-        builder: (_) => _PhoneCallPage(
-          contactName: widget.conversation.name,
-          phoneNumber: number,
-        ),
-      ),
+    await _openVoiceCallScreen(
+      context,
+      number,
+      contactName: widget.conversation.name,
     );
   }
 
   Future<void> _startVideoCall() async {
-    final room = _newCallRoom();
-    final confirmed = await _confirmMeetingStart(
+    final conversationId = widget.conversation.backendId;
+    final client = widget.callClient;
+    if (conversationId == null || widget.conversation.isSmsRoute) {
+      await _showVideoUnavailable(
+        title: 'AirText account required',
+        message: 'Video calls are available between AirText accounts.',
+      );
+      return;
+    }
+    if (client == null) {
+      await _showVideoUnavailable(
+        title: 'AirText calls unavailable',
+        message: 'The AirText calling server is not configured or reachable.',
+      );
+      return;
+    }
+
+    await Navigator.push<void>(
       context,
-      title: 'Video call with ${widget.conversation.name}',
-      room: room,
+      MaterialPageRoute<void>(
+        builder: (_) => VideoCallScreen(
+          callerName: widget.conversation.name,
+          onJoinCall:
+              (
+                callScreenContext, {
+                required bool microphoneMuted,
+                required bool cameraDisabled,
+              }) async {
+                try {
+                  final response = await client.createCall(conversationId);
+                  final call = response['data'] as Map<String, dynamic>;
+                  if (!callScreenContext.mounted) return;
+                  await Navigator.pushReplacement<void, void>(
+                    callScreenContext,
+                    MaterialPageRoute<void>(
+                      builder: (_) => ActiveVideoCallScreen(
+                        callClient: client,
+                        callId: call['id'] as String,
+                        contactName: widget.conversation.name,
+                        isCaller: true,
+                        startMuted: microphoneMuted,
+                        startCameraOff: cameraDisabled,
+                      ),
+                    ),
+                  );
+                } on AirTextCallClientException catch (error) {
+                  if (callScreenContext.mounted) {
+                    ScaffoldMessenger.of(callScreenContext)
+                        .showSnackBar(SnackBar(content: Text(error.message)));
+                  }
+                }
+              },
+        ),
+      ),
     );
-    if (!confirmed || !mounted) return;
-    await _joinCallRoom(context, room: room, displayName: widget.displayName);
   }
 
   Future<void> _showVideoUnavailable({
@@ -2719,11 +4722,6 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
     );
   }
 
-  Future<void> _showVoiceUnavailable() => _showUnavailableFeature(
-    'Voice messages',
-    'Voice recording and audio upload are not connected to the Air app message API yet.',
-  );
-
   Future<void> _showUnavailableFeature(String title, String message) async {
     await showCupertinoDialog<void>(
       context: context,
@@ -2768,10 +4766,13 @@ class _ChatDetailPageState extends State<ChatDetailPage> {
           _shareLastSeen = value;
           widget.conversation.shareLastSeen = value;
         }),
-        onReadReceiptsChanged: (value) => setState(() {
-          _readReceipts = value;
-          widget.conversation.readReceipts = value;
-        }),
+        onReadReceiptsChanged: (value) {
+          setState(() {
+            _readReceipts = value;
+            widget.conversation.readReceipts = value;
+          });
+          if (value) _markConversationRead();
+        },
         onClearChat: () {
           setState(() => widget.conversation.messages.clear());
           widget.onMessageSent();
@@ -2811,66 +4812,36 @@ class _AirTextShopPage extends StatefulWidget {
 }
 
 class _AirTextShopPageState extends State<_AirTextShopPage> {
-  static const _products = [
+  static const List<_ShopProductData> _products = [
     _ShopProductData(
-      id: 'credits-5000',
-      category: 'credits',
-      icon: Icons.inventory_2_outlined,
-      eyebrow: '5,000 BULK SMS',
-      name: 'SMS Credits Package',
-      description: 'High-throughput local GSM routes for campaigns and alerts.',
-      price: 'TZS 50,000',
-      action: 'Buy package',
-    ),
-    _ShopProductData(
-      id: 'gemini-bot',
+      id: 'tourism-sms-bot',
       category: 'bots',
-      icon: Icons.smart_toy_outlined,
-      eyebrow: 'GEMINI AI BOT',
-      name: 'AI Auto-Responder Bot',
-      description: 'Automated SMS customer support that replies around the clock.',
-      price: 'TZS 15,000 / month',
-      action: 'Install bot',
+      icon: Icons.chat_bubble_outline,
+      eyebrow: 'AI assistant',
+      name: 'Tourism SMS Bot',
+      description: 'Autonomous trip confirmations, promos, and FAQ replies for tour operators and agencies.',
+      price: 'TZS 45,000',
+      action: 'Install',
     ),
     _ShopProductData(
-      id: 'sender-id',
+      id: 'gateway-recovery-suite',
       category: 'gateways',
-      icon: Icons.sell_outlined,
-      eyebrow: 'BRANDED SENDER ID',
-      name: 'Custom Sender ID',
-      description: 'Register a trusted business name for outgoing messages.',
-      price: 'TZS 30,000 / year',
-      action: 'Request ID',
+      icon: Icons.cell_tower,
+      eyebrow: 'Operations',
+      name: 'Gateway Recovery Suite',
+      description: 'Retry logic, routing fallbacks, and delivery alerts to keep your SMS flow resilient.',
+      price: 'TZS 120,000',
+      action: 'Deploy',
     ),
     _ShopProductData(
-      id: 'tourism-bot',
-      category: 'bots',
-      icon: Icons.auto_awesome_outlined,
-      eyebrow: 'READY TO DEPLOY',
-      name: 'Tourism Concierge Bot',
-      description: 'Answer booking and itinerary questions automatically.',
-      price: 'TZS 12,000 / month',
-      action: 'Install bot',
-    ),
-    _ShopProductData(
-      id: 'order-template',
+      id: 'lead-capture-templates',
       category: 'templates',
       icon: Icons.description_outlined,
-      eyebrow: 'MESSAGE TEMPLATE',
-      name: 'Order Updates Pack',
-      description: 'Prebuilt delivery, payment, and order notification flows.',
-      price: 'TZS 8,000 one-time',
-      action: 'Get template',
-    ),
-    _ShopProductData(
-      id: 'gsm-node',
-      category: 'gateways',
-      icon: Icons.router_outlined,
-      eyebrow: '99.9% UPTIME',
-      name: 'Dedicated GSM Gateway Node',
-      description: 'A dedicated route for business-critical SMS traffic.',
-      price: 'TZS 45,000 / month',
-      action: 'Activate node',
+      eyebrow: 'Campaigns',
+      name: 'Lead Capture Templates',
+      description: 'Ready-made response flows for property shows, sales inquiries, and follow-up sequences.',
+      price: 'TZS 18,000',
+      action: 'Use template',
     ),
   ];
 
@@ -2924,15 +4895,15 @@ class _AirTextShopPageState extends State<_AirTextShopPage> {
                         ),
                       ),
                       Text(
-                        'Marketplace',
+                        _appCopy(context, 'Marketplace'),
                         style: TextStyle(color: muted, fontSize: 12),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Payments are not connected',
-                  onPressed: _topUpCredits,
+                  tooltip: _appCopy(context, 'Wallet is not connected'),
+                  onPressed: null,
                   icon: Icon(Icons.add_card_outlined, color: accent),
                 ),
               ],
@@ -2953,12 +4924,12 @@ class _AirTextShopPageState extends State<_AirTextShopPage> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Wallet',
+                      _appCopy(context, 'Wallet'),
                       style: TextStyle(color: muted, fontSize: 12),
                     ),
                   ),
                   Text(
-                    'Not connected',
+                    _appCopy(context, 'Not connected'),
                     style: TextStyle(
                       color: text,
                       fontSize: 15,
@@ -2976,7 +4947,7 @@ class _AirTextShopPageState extends State<_AirTextShopPage> {
               onChanged: (_) => setState(() {}),
               style: TextStyle(color: text, fontSize: 14),
               decoration: InputDecoration(
-                hintText: 'Search products and services',
+                hintText: _appCopy(context, 'Search products and services'),
                 hintStyle: TextStyle(color: muted, fontSize: 13),
                 prefixIcon: Icon(Icons.search, color: muted, size: 20),
                 filled: true,
@@ -2997,9 +4968,15 @@ class _AirTextShopPageState extends State<_AirTextShopPage> {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
             child: SegmentedButton<String>(
               showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: 'browse', label: Text('Browse')),
-                ButtonSegment(value: 'installed', label: Text('Installed')),
+              segments: [
+                ButtonSegment(
+                  value: 'browse',
+                  label: Text(_appCopy(context, 'Browse')),
+                ),
+                ButtonSegment(
+                  value: 'installed',
+                  label: Text(_appCopy(context, 'Installed')),
+                ),
               ],
               selected: {_section},
               onSelectionChanged: (selection) =>
@@ -3017,7 +4994,7 @@ class _AirTextShopPageState extends State<_AirTextShopPage> {
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: ChoiceChip(
-                        label: Text(category.label),
+                        label: Text(_appCopy(context, category.label)),
                         selected: _category == category.value,
                         showCheckmark: false,
                         onSelected: (_) =>
@@ -3068,7 +5045,10 @@ class _AirTextShopPageState extends State<_AirTextShopPage> {
 
     if (products.isEmpty) {
       return Center(
-        child: Text('No products found', style: TextStyle(color: muted)),
+        child: Text(
+          _appCopy(context, 'No verified products are currently published.'),
+          style: TextStyle(color: muted),
+        ),
       );
     }
 
@@ -3179,7 +5159,10 @@ class _AirTextShopPageState extends State<_AirTextShopPage> {
         .toList();
     if (products.isEmpty) {
       return Center(
-        child: Text('No installed services', style: TextStyle(color: muted)),
+        child: Text(
+          _appCopy(context, 'No installed services'),
+          style: TextStyle(color: muted),
+        ),
       );
     }
 
@@ -3228,18 +5211,15 @@ class _AirTextShopPageState extends State<_AirTextShopPage> {
     );
   }
 
-  void _topUpCredits() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Payments are not configured. No credits were added.'),
-      ),
-    );
-  }
-
   void _selectProduct(_ShopProductData product) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Payments are not configured. No purchase was made.'),
+      SnackBar(
+        content: Text(
+          _appCopy(
+            context,
+            'Payments are not configured. No purchase was made.',
+          ),
+        ),
       ),
     );
   }
@@ -3251,14 +5231,12 @@ class _CallEntry {
     required this.number,
     required this.time,
     required this.direction,
-    this.missed = false,
   });
 
   final String name;
   final String number;
   final String time;
   final String direction;
-  final bool missed;
 }
 
 class _PhoneCallPage extends StatefulWidget {
@@ -3280,152 +5258,187 @@ class _PhoneCallPageState extends State<_PhoneCallPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF07131A),
-      body: Stack(
-        children: [
-          const Positioned.fill(
-            child: CustomPaint(painter: _CallPattern()),
-          ),
-          SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        color: Colors.white,
-                        icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                        tooltip: 'Close call screen',
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return Stack(
+            children: [
+              const Positioned.fill(
+                child: CustomPaint(painter: _CallPattern()),
+              ),
+              SafeArea(
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight,
+                    ),
+                    child: IntrinsicHeight(
+                      child: Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
+                            child: Row(
+                              children: [
+                                IconButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  color: Colors.white,
+                                  icon: const Icon(
+                                    Icons.keyboard_arrow_down_rounded,
+                                  ),
+                                  tooltip: 'Close call screen',
+                                ),
+                                const Spacer(),
+                                const Icon(
+                                  Icons.lock_outline,
+                                  color: Colors.white70,
+                                  size: 15,
+                                ),
+                                const SizedBox(width: 6),
+                                const Text(
+                                  'AIR APP CALL',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 1.4,
+                                  ),
+                                ),
+                                const Spacer(),
+                                const SizedBox(width: 48),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 38),
+                          CircleAvatar(
+                            radius: 82,
+                            backgroundColor: const Color(0xFF020608),
+                            child: Text(
+                              widget.contactName.trim().isEmpty
+                                  ? '?'
+                                  : widget.contactName.trim()[0].toUpperCase(),
+                              style: const TextStyle(
+                                color: Color(0xFFB9E878),
+                                fontSize: 54,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 22),
+                          Text(
+                            widget.contactName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 25,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            widget.phoneNumber,
+                            style: const TextStyle(
+                              color: Color(0xFFAAB8BE),
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Voice calling unavailable',
+                            style: TextStyle(
+                              color: Color(0xFFAAB8BE),
+                              fontSize: 13,
+                            ),
+                          ),
+                          const Spacer(),
+                          Container(
+                            margin: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+                            padding: const EdgeInsets.fromLTRB(14, 20, 14, 18),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF141D21),
+                              borderRadius: BorderRadius.circular(34),
+                              border: Border.all(
+                                color: const Color(0xFF26343A),
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  children: [
+                                    _CallControl(
+                                      icon: Icons.volume_up_rounded,
+                                      label: 'Speaker',
+                                      selected: _speakerOn,
+                                      onTap: () => setState(
+                                        () => _speakerOn = !_speakerOn,
+                                      ),
+                                    ),
+                                    _CallControl(
+                                      icon: Icons.videocam_rounded,
+                                      label: 'Video',
+                                      selected: _videoOn,
+                                      onTap: () =>
+                                          setState(() => _videoOn = !_videoOn),
+                                    ),
+                                    _CallControl(
+                                      icon: _muted
+                                          ? Icons.mic_off_rounded
+                                          : Icons.mic_rounded,
+                                      label: 'Mute',
+                                      selected: _muted,
+                                      onTap: () =>
+                                          setState(() => _muted = !_muted),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 18),
+                                Row(
+                                  children: [
+                                    _CallControl(
+                                      icon: Icons.more_horiz_rounded,
+                                      label: 'More',
+                                      onTap: _showMore,
+                                    ),
+                                    _CallControl(
+                                      icon: Icons.share_rounded,
+                                      label: 'Share',
+                                      onTap: _shareNumber,
+                                    ),
+                                    _CallControl(
+                                      icon: Icons.call_rounded,
+                                      label: 'Call',
+                                      color: const Color(0xFFB9E878),
+                                      foreground: const Color(0xFF101714),
+                                      onTap: _startPhoneCall,
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      const Spacer(),
-                      const Icon(Icons.lock_outline, color: Colors.white70, size: 15),
-                      const SizedBox(width: 6),
-                      const Text(
-                        'AIR APP CALL',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1.4,
-                        ),
-                      ),
-                      const Spacer(),
-                      const SizedBox(width: 48),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 38),
-                CircleAvatar(
-                  radius: 82,
-                  backgroundColor: const Color(0xFF020608),
-                  child: Text(
-                    widget.contactName.trim().isEmpty
-                        ? '?'
-                        : widget.contactName.trim()[0].toUpperCase(),
-                    style: const TextStyle(
-                      color: Color(0xFFB9E878),
-                      fontSize: 54,
-                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
-                const SizedBox(height: 22),
-                Text(
-                  widget.contactName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 25,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  widget.phoneNumber,
-                  style: const TextStyle(color: Color(0xFFAAB8BE), fontSize: 14),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Ready to call',
-                  style: TextStyle(color: Color(0xFFAAB8BE), fontSize: 13),
-                ),
-                const Spacer(),
-                Container(
-                  margin: const EdgeInsets.fromLTRB(20, 0, 20, 18),
-                  padding: const EdgeInsets.fromLTRB(14, 20, 14, 18),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF141D21),
-                    borderRadius: BorderRadius.circular(34),
-                    border: Border.all(color: const Color(0xFF26343A)),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          _CallControl(
-                            icon: Icons.volume_up_rounded,
-                            label: 'Speaker',
-                            selected: _speakerOn,
-                            onTap: () => setState(() => _speakerOn = !_speakerOn),
-                          ),
-                          _CallControl(
-                            icon: Icons.videocam_rounded,
-                            label: 'Video',
-                            selected: _videoOn,
-                            onTap: () => setState(() => _videoOn = !_videoOn),
-                          ),
-                          _CallControl(
-                            icon: _muted ? Icons.mic_off_rounded : Icons.mic_rounded,
-                            label: 'Mute',
-                            selected: _muted,
-                            onTap: () => setState(() => _muted = !_muted),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 18),
-                      Row(
-                        children: [
-                          _CallControl(
-                            icon: Icons.more_horiz_rounded,
-                            label: 'More',
-                            onTap: _showMore,
-                          ),
-                          _CallControl(
-                            icon: Icons.share_rounded,
-                            label: 'Share',
-                            onTap: _shareNumber,
-                          ),
-                          _CallControl(
-                            icon: Icons.call_rounded,
-                            label: 'Call',
-                            color: const Color(0xFFB9E878),
-                            foreground: const Color(0xFF101714),
-                            onTap: _startPhoneCall,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
   Future<void> _startPhoneCall() async {
-    final phone = widget.phoneNumber.replaceAll(RegExp(r'\s+'), '');
-    final uri = Uri(scheme: 'tel', path: phone);
-    if (await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (mounted) Navigator.pop(context);
-    } else if (mounted) {
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No phone app is available.')),
+        const SnackBar(
+          content: Text('Live voice calling is not connected yet.'),
+        ),
       );
     }
   }
@@ -3433,9 +5446,8 @@ class _PhoneCallPageState extends State<_PhoneCallPage> {
   Future<void> _shareNumber() async {
     await Clipboard.setData(ClipboardData(text: widget.phoneNumber));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Number copied.')),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Number copied.')));
   }
 
   Future<void> _showMore() async {
@@ -3474,10 +5486,10 @@ class _CallControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final background = color ??
-        (selected ? Colors.white : const Color(0xFF202A2F));
-    final iconColor = foreground ??
-        (selected ? const Color(0xFF101714) : Colors.white);
+    final background =
+        color ?? (selected ? Colors.white : const Color(0xFF202A2F));
+    final iconColor =
+        foreground ?? (selected ? const Color(0xFF101714) : Colors.white);
     return Expanded(
       child: Semantics(
         button: true,
@@ -3519,11 +5531,7 @@ class _CallPattern extends CustomPainter {
       for (var x = 0.0; x < size.width; x += spacing) {
         final offset = ((x / spacing).floor() + (y / spacing).floor()) % 2;
         canvas.drawCircle(Offset(x + offset * 18, y + 18), 8, paint);
-        canvas.drawLine(
-          Offset(x + 23, y + 12),
-          Offset(x + 31, y + 20),
-          paint,
-        );
+        canvas.drawLine(Offset(x + 23, y + 12), Offset(x + 31, y + 20), paint);
       }
     }
   }
@@ -3533,9 +5541,7 @@ class _CallPattern extends CustomPainter {
 }
 
 class _CallsPage extends StatefulWidget {
-  const _CallsPage({required this.displayName});
-
-  final String displayName;
+  const _CallsPage();
 
   @override
   State<_CallsPage> createState() => _CallsPageState();
@@ -3543,33 +5549,11 @@ class _CallsPage extends StatefulWidget {
 
 class _CallsPageState extends State<_CallsPage> {
   final _numberController = TextEditingController();
-  final _roomController = TextEditingController();
-  final List<_CallEntry> _history = [
-    const _CallEntry(
-      name: 'Mariam Hassan',
-      number: '+255 718 220 901',
-      time: 'Today, 10:42 AM',
-      direction: 'Outgoing',
-    ),
-    const _CallEntry(
-      name: 'Juma K.',
-      number: '+255 712 884 102',
-      time: 'Yesterday, 8:15 PM',
-      direction: 'Incoming',
-    ),
-    const _CallEntry(
-      name: 'Unknown number',
-      number: '+255 782 328 215',
-      time: 'Mon, 4:20 PM',
-      direction: 'Missed',
-      missed: true,
-    ),
-  ];
+  final List<_CallEntry> _history = [];
 
   @override
   void dispose() {
     _numberController.dispose();
-    _roomController.dispose();
     super.dispose();
   }
 
@@ -3624,39 +5608,9 @@ class _CallsPageState extends State<_CallsPage> {
                   foregroundColor: _green,
                   child: const Icon(Icons.video_call_outlined),
                 ),
-                title: const Text('Start a video or group call'),
-                subtitle: const Text('Create a room and invite others'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: _startGroupCall,
-              ),
-              const _GroupDivider(),
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: CupertinoTextField(
-                        controller: _roomController,
-                        placeholder: 'Meeting link or room code',
-                        textInputAction: TextInputAction.go,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        onChanged: (_) => setState(() {}),
-                        onSubmitted: (_) => _joinMeeting(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton.filled(
-                      tooltip: 'Join video call',
-                      onPressed: _roomController.text.trim().isEmpty
-                          ? null
-                          : _joinMeeting,
-                      icon: const Icon(Icons.video_call_outlined),
-                    ),
-                  ],
-                ),
+                title: const Text('Start an AirText video call'),
+                subtitle: const Text('Start a call from an AirText chat'),
+                trailing: const Icon(Icons.lock_outline),
               ),
             ],
           ),
@@ -3664,21 +5618,15 @@ class _CallsPageState extends State<_CallsPage> {
           const _ListSectionLabel('RECENT CALLS'),
           _GroupedList(
             children: [
+              if (_history.isEmpty)
+                const ListTile(title: Text('No recent calls')),
               for (var index = 0; index < _history.length; index++) ...[
                 if (index > 0) const _GroupDivider(),
                 ListTile(
                   leading: CircleAvatar(
-                    backgroundColor: _history[index].missed
-                        ? const Color(0xFFFFE7E5)
-                        : const Color(0xFFE5EFFF),
-                    foregroundColor: _history[index].missed
-                        ? const Color(0xFFFF3B30)
-                        : _green,
-                    child: Icon(
-                      _history[index].missed
-                          ? CupertinoIcons.phone_down
-                          : CupertinoIcons.phone,
-                    ),
+                    backgroundColor: const Color(0xFFE5EFFF),
+                    foregroundColor: _green,
+                    child: const Icon(CupertinoIcons.phone),
                   ),
                   title: Text(_history[index].name),
                   subtitle: Text(
@@ -3698,7 +5646,7 @@ class _CallsPageState extends State<_CallsPage> {
             ],
           ),
           const Text(
-            'Phone calls use your device dialer. Video and group calls use Jitsi Meet and require an internet connection.',
+            'AirText video calls are started from direct chats.',
             style: TextStyle(color: Color(0xFF6D6D72), fontSize: 12),
           ),
         ],
@@ -3706,63 +5654,26 @@ class _CallsPageState extends State<_CallsPage> {
     );
   }
 
-  Future<void> _startGroupCall() async {
-    final room = _newCallRoom();
-    final confirmed = await _confirmMeetingStart(
-      context,
-      title: 'Start a video or group call',
-      room: room,
-    );
-    if (!confirmed || !mounted) return;
-    await _joinCallRoom(context, room: room, displayName: widget.displayName);
-  }
-
-  Future<void> _joinMeeting() async {
-    final entered = _roomController.text.trim();
-    if (entered.isEmpty) return;
-    final uri = Uri.tryParse(
-      entered.startsWith('http') ? entered : 'https://meet.jit.si/$entered',
-    );
-    final room = (uri?.pathSegments.lastOrNull ?? entered).replaceAll(
-      RegExp(r'[^A-Za-z0-9_-]'),
-      '',
-    );
-    if (room.length < 4) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter a valid meeting link or room code.'),
-        ),
-      );
+  Future<void> _call(String name, String number) async {
+    final uri = _telephoneUri(number);
+    if (uri == null ||
+        !await _openVoiceCallScreen(context, number, contactName: name)) {
       return;
     }
-    _roomController.clear();
-    setState(() {});
-    await _joinCallRoom(context, room: room, displayName: widget.displayName);
-  }
-
-  Future<void> _call(String name, String number) async {
-    final cleanNumber = number.replaceAll(RegExp(r'[^0-9+*#]'), '');
-    if (cleanNumber.replaceAll(RegExp(r'\D'), '').length < 7) return;
+    final cleanNumber = uri.path;
+    if (!mounted) return;
     setState(() {
       _history.insert(
         0,
         _CallEntry(
           name: name,
-          number: number,
+          number: cleanNumber,
           time: 'Just now',
           direction: 'Outgoing',
         ),
       );
       _numberController.clear();
     });
-    await Navigator.of(context).push<void>(
-      CupertinoPageRoute<void>(
-        builder: (_) => _PhoneCallPage(
-          contactName: name,
-          phoneNumber: cleanNumber,
-        ),
-      ),
-    );
   }
 }
 
@@ -4080,27 +5991,110 @@ class _ContactProfileSheetState extends State<_ContactProfileSheet> {
 class _MessageBubble extends StatefulWidget {
   const _MessageBubble({
     required this.message,
+    required this.api,
+    required this.conversationId,
     required this.isAirTextRoute,
     required this.accentColor,
+    required this.onTranslate,
+    required this.onMessageChanged,
   });
 
   final ChatMessage message;
+  final AirTextApi api;
+  final int? conversationId;
   final bool isAirTextRoute;
   final Color accentColor;
+  final Future<void> Function() onTranslate;
+  final VoidCallback onMessageChanged;
 
   @override
   State<_MessageBubble> createState() => _MessageBubbleState();
 }
 
 class _MessageBubbleState extends State<_MessageBubble> {
+  final AudioPlayer _voicePlayer = AudioPlayer();
+  Timer? _viewOnceTimer;
+  bool _openingViewOnce = false;
+
+  @override
+  void dispose() {
+    _viewOnceTimer?.cancel();
+    unawaited(_voicePlayer.dispose());
+    super.dispose();
+  }
+
+  Future<void> _playVoiceMessage() async {
+    final url = widget.message.mediaUrl;
+    if (url == null || widget.message.backendId == null) return;
+    final localPath = await widget.api.downloadVoiceMessage(url);
+    await _voicePlayer.play(DeviceFileSource(localPath));
+    if (widget.message.viewOnce) {
+      await _voicePlayer.onPlayerComplete.first;
+      try {
+        await File(localPath).delete();
+      } on FileSystemException {
+        debugPrint('Temporary voice cleanup failed.');
+      }
+      if (!mounted) return;
+      setState(() {
+        widget.message.mediaUrl = null;
+        widget.message.text = 'Opened once';
+        widget.message.viewOncePending = false;
+        widget.message.viewedAt = DateTime.now();
+      });
+      widget.onMessageChanged();
+    }
+  }
+
+  Future<void> _openViewOnce() async {
+    final conversationId = widget.conversationId;
+    final messageId = widget.message.backendId;
+    if (_openingViewOnce || conversationId == null || messageId == null) return;
+    setState(() => _openingViewOnce = true);
+    try {
+      final payload = await widget.api.openViewOnceMessage(
+        conversationId,
+        messageId,
+      );
+      if (!mounted) return;
+      if (widget.message.messageType == 'voice') {
+        setState(() {
+          widget.message.mediaUrl = payload['media_url'] as String?;
+          widget.message.viewOncePending = false;
+          _openingViewOnce = false;
+        });
+        await _playVoiceMessage();
+        return;
+      }
+
+      setState(() {
+        widget.message.text = payload['body'] as String? ?? '';
+        widget.message.viewOncePending = false;
+        widget.message.viewedAt = DateTime.now();
+        _openingViewOnce = false;
+      });
+      widget.onMessageChanged();
+      _viewOnceTimer = Timer(const Duration(seconds: 10), () {
+        if (!mounted) return;
+        setState(() => widget.message.text = 'Opened once');
+        widget.onMessageChanged();
+      });
+    } on AirTextApiException catch (error) {
+      if (!mounted) return;
+      setState(() => _openingViewOnce = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final message = widget.message;
     final isFailed = message.status == 'failed';
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bubbleColor = isDark
-        ? (message.isMine ? const Color(0xFF155B46) : _panel)
-        : (message.isMine ? const Color(0xFFD9FDD3) : _lightPanel);
+      ? (message.isMine ? const Color(0xFF005C4B) : const Color(0xFF202C33))
+      : (message.isMine ? const Color(0xFFD9FDD3) : const Color(0xFFFFFFFF));
     final messageTextColor = isDark ? _nexusText : _ink;
     final mutedTextColor = isDark ? _silver : _lightMuted;
     final routeColor = isFailed
@@ -4119,7 +6113,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
           : CrossAxisAlignment.start,
       children: [
         GestureDetector(
-          onLongPress: _chooseReaction,
+          onLongPress: _showMessageActions,
           child: Align(
             alignment: message.isMine
                 ? Alignment.centerRight
@@ -4155,14 +6149,77 @@ class _MessageBubbleState extends State<_MessageBubble> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      message.text,
-                      style: TextStyle(
-                        color: messageTextColor,
-                        fontSize: 14,
-                        height: 1.4,
+                    if (message.viewOncePending)
+                      TextButton.icon(
+                        onPressed: _openingViewOnce ? null : _openViewOnce,
+                        icon: Icon(
+                          CupertinoIcons.eye,
+                          color: widget.accentColor,
+                        ),
+                        label: Text(
+                          _openingViewOnce ? 'Opening…' : 'Open once',
+                          style: TextStyle(color: widget.accentColor),
+                        ),
+                      )
+                    else if (message.messageType == 'voice')
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: message.mediaUrl == null
+                                ? 'View-once audio opened'
+                                : 'Play voice message',
+                            onPressed: message.mediaUrl == null
+                                ? null
+                                : _playVoiceMessage,
+                            icon: Icon(
+                              message.mediaUrl == null
+                                  ? CupertinoIcons.eye
+                                  : CupertinoIcons.play_circle_fill,
+                              color: widget.accentColor,
+                            ),
+                          ),
+                          Text(
+                            message.mediaUrl == null
+                                ? 'Opened once'
+                                : 'Voice message',
+                            style: TextStyle(color: messageTextColor),
+                          ),
+                        ],
+                      )
+                    else
+                      Text(
+                        message.text.isEmpty && message.viewOnce
+                            ? 'Opened once'
+                            : message.text,
+                        style: TextStyle(
+                          color: messageTextColor,
+                          fontSize: 14,
+                          height: 1.4,
+                        ),
                       ),
-                    ),
+                    if (message.translation != null) ...[
+                      const SizedBox(height: 7),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.only(top: 7),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            top: BorderSide(
+                              color: mutedTextColor.withValues(alpha: 0.35),
+                            ),
+                          ),
+                        ),
+                        child: Text(
+                          message.translation!,
+                          style: TextStyle(
+                            color: messageTextColor,
+                            fontSize: 14,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 4),
                     Row(
                       mainAxisSize: MainAxisSize.min,
@@ -4190,12 +6247,16 @@ class _MessageBubbleState extends State<_MessageBubble> {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        if (message.isMine) ...[
+                        if (message.isMine && !isFailed) ...[
                           const SizedBox(width: 4),
                           Icon(
-                            Icons.done_all,
+                            message.status == 'sent'
+                                ? Icons.done
+                                : Icons.done_all,
                             size: 13,
-                            color: isDark ? _mint : _green,
+                            color: message.status == 'read'
+                                ? const Color(0xFF4FA3E0)
+                                : mutedTextColor,
                           ),
                         ],
                       ],
@@ -4229,6 +6290,35 @@ class _MessageBubbleState extends State<_MessageBubble> {
         const SizedBox(height: 8),
       ],
     );
+  }
+
+  Future<void> _showMessageActions() async {
+    final action = await showCupertinoModalPopup<String>(
+      context: context,
+      builder: (context) => CupertinoActionSheet(
+        title: const Text('Message actions'),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.pop(context, 'translate'),
+            child: const Text('Translate message'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.pop(context, 'react'),
+            child: const Text('React to message'),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'translate') {
+      await widget.onTranslate();
+    } else if (action == 'react') {
+      await _chooseReaction();
+    }
   }
 
   Future<void> _chooseReaction() async {
@@ -4266,10 +6356,10 @@ class _FloatingNavigationDock extends StatelessWidget {
   final ValueChanged<int> onSelected;
 
   static const _destinations = [
-    (label: 'Nexus', icon: CupertinoIcons.chat_bubble_2),
-    (label: 'Mesh', icon: CupertinoIcons.circle_grid_3x3),
+    (label: 'Chats', icon: CupertinoIcons.chat_bubble_2),
+    (label: 'Updates', icon: CupertinoIcons.circle_grid_3x3),
     (label: 'Shop', icon: CupertinoIcons.bag),
-    (label: 'Vault', icon: CupertinoIcons.settings),
+    (label: 'Settings', icon: CupertinoIcons.settings),
     (label: 'Profile', icon: CupertinoIcons.person_crop_circle),
   ];
 
@@ -4303,7 +6393,7 @@ class _FloatingNavigationDock extends StatelessWidget {
               for (var index = 0; index < _destinations.length; index++)
                 Expanded(
                   child: _DockDestination(
-                    label: _destinations[index].label,
+                    label: _appCopy(context, _destinations[index].label),
                     icon: _destinations[index].icon,
                     isSelected: selectedIndex == index,
                     onTap: () => onSelected(index),
@@ -4390,8 +6480,44 @@ class _StatusUpdate {
     required this.color,
     required this.message,
     this.isMine = false,
-    this.imageBytes,
+    this.authorEmail,
+    this.mediaUrl,
+    this.backendId,
+    this.hasViewed = false,
+    this.views = 0,
+    this.likes = 0,
+    this.hasLiked = false,
+    this.screenshotProtected = false,
+    this.viewOnce = false,
   });
+
+  factory _StatusUpdate.fromApi(Map<String, dynamic> json) {
+    final createdAt = DateTime.tryParse(json['created_at'] as String? ?? '');
+    final background = json['background'] as String? ?? '#00a884';
+    final body = json['body'] as String? ?? json['caption'] as String? ?? '';
+
+    return _StatusUpdate(
+      name: json['author_name'] as String? ?? 'Air app user',
+      initials: json['author_initials'] as String? ?? '?',
+      time: createdAt == null
+          ? 'Just now'
+          : _formatMessageTime(createdAt.toLocal()),
+      color: Color(
+        0xFF000000 | int.parse(background.replaceFirst('#', ''), radix: 16),
+      ),
+      message: body.isEmpty ? 'Photo status' : body,
+      isMine: json['is_mine'] as bool? ?? false,
+      authorEmail: json['author_email'] as String?,
+      mediaUrl: json['media_url'] as String?,
+      backendId: json['id'] as int?,
+      hasViewed: json['has_viewed'] as bool? ?? false,
+      views: json['views_count'] as int? ?? 0,
+      likes: json['likes_count'] as int? ?? 0,
+      hasLiked: json['has_liked'] as bool? ?? false,
+      screenshotProtected: json['screenshot_protected'] as bool? ?? false,
+      viewOnce: json['view_once'] as bool? ?? false,
+    );
+  }
 
   final String name;
   final String initials;
@@ -4399,11 +6525,17 @@ class _StatusUpdate {
   final Color color;
   final String message;
   final bool isMine;
-  final Uint8List? imageBytes;
-  int views = 0;
-  int likes = 0;
-  bool likedByMe = false;
-  final List<String> comments = [];
+  final String? authorEmail;
+  final String? mediaUrl;
+  final int? backendId;
+  bool hasViewed;
+  int views;
+  int likes;
+  bool hasLiked;
+  final bool screenshotProtected;
+  final bool viewOnce;
+  List<String> viewerNames = [];
+  List<String> likerNames = [];
 }
 
 class _Community {
@@ -4421,7 +6553,10 @@ class _Community {
 }
 
 class _UpdatesPage extends StatefulWidget {
-  const _UpdatesPage();
+  const _UpdatesPage({required this.api, required this.displayName});
+
+  final AirTextApi api;
+  final String displayName;
 
   @override
   State<_UpdatesPage> createState() => _UpdatesPageState();
@@ -4429,22 +6564,10 @@ class _UpdatesPage extends StatefulWidget {
 
 class _UpdatesPageState extends State<_UpdatesPage> {
   _StatusUpdate? _myStatus;
-  final List<_StatusUpdate> _recentStatuses = [
-    _StatusUpdate(
-      name: 'Mariam Hassan',
-      initials: 'MH',
-      time: 'Today, 10:42 AM',
-      color: const Color(0xFFD6E9DE),
-      message: 'Asubuhi nzuri kutoka mjini!',
-    ),
-    _StatusUpdate(
-      name: 'Juma K.',
-      initials: 'JK',
-      time: 'Yesterday, 8:15 PM',
-      color: const Color(0xFFF5DFCC),
-      message: 'Safari njema, tutaonana kesho.',
-    ),
-  ];
+  List<_StatusUpdate> _recentStatuses = [];
+  List<_StatusUpdate> _viewedStatuses = [];
+  bool _loadingStatuses = false;
+  bool _wasAuthenticated = false;
   final List<_Community> _communities = [
     _Community(
       'Air app Community',
@@ -4459,7 +6582,58 @@ class _UpdatesPageState extends State<_UpdatesPage> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _wasAuthenticated = widget.api.isAuthenticated;
+    _loadStatuses();
+  }
+
+  @override
+  void didUpdateWidget(covariant _UpdatesPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_wasAuthenticated && widget.api.isAuthenticated) {
+      _loadStatuses();
+    }
+    _wasAuthenticated = widget.api.isAuthenticated;
+  }
+
+  Future<void> _loadStatuses() async {
+    if (!widget.api.isAuthenticated) {
+      setState(() {
+        _myStatus = null;
+        _recentStatuses = [];
+        _viewedStatuses = [];
+      });
+      return;
+    }
+
+    setState(() => _loadingStatuses = true);
+    try {
+      final statuses = await widget.api._getStatuses();
+      if (!mounted) return;
+      setState(() {
+        _myStatus = statuses.where((status) => status.isMine).firstOrNull;
+        _recentStatuses = statuses
+            .where((status) => !status.isMine && !status.hasViewed)
+            .toList();
+        _viewedStatuses = statuses
+            .where((status) => !status.isMine && status.hasViewed)
+            .toList();
+        _loadingStatuses = false;
+      });
+    } on AirTextApiException catch (error) {
+      if (!mounted) return;
+      setState(() => _loadingStatuses = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : _ink;
+    final mutedColor = isDark ? _silver : _lightMuted;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -4467,20 +6641,25 @@ class _UpdatesPageState extends State<_UpdatesPage> {
           padding: const EdgeInsets.fromLTRB(22, 18, 12, 12),
           child: Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Status',
+                  _appCopy(context, 'Updates'),
                   style: TextStyle(
-                    color: _ink,
-                    fontSize: 29,
-                    fontWeight: FontWeight.w800,
+                    color: textColor,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
               IconButton(
-                tooltip: 'Communities',
+                tooltip: _appCopy(context, 'Communities'),
                 onPressed: _openCommunities,
                 icon: const Icon(CupertinoIcons.person_3, color: _green),
+              ),
+              IconButton(
+                tooltip: _appCopy(context, 'Refresh updates'),
+                onPressed: _loadStatuses,
+                icon: const Icon(CupertinoIcons.refresh, color: _green),
               ),
             ],
           ),
@@ -4489,7 +6668,7 @@ class _UpdatesPageState extends State<_UpdatesPage> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
             children: [
-              const _ListSectionLabel('MY STATUS'),
+              _ListSectionLabel(_appCopy(context, 'STATUS')),
               _GroupedList(
                 children: [
                   ListTile(
@@ -4499,25 +6678,19 @@ class _UpdatesPageState extends State<_UpdatesPage> {
                     ),
                     leading: _MyStatusAvatar(
                       hasStatus: _myStatus != null,
-                      imageBytes: _myStatus?.imageBytes,
+                      imageUrl: _myStatus?.mediaUrl,
                     ),
-                    title: const Text(
-                      'My Status',
-                      style: TextStyle(
-                        color: _ink,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    title: Text(
+                      _appCopy(context, 'My Status'),
+                      style: TextStyle(fontWeight: FontWeight.w700),
                     ),
                     subtitle: Text(
                       _myStatus == null
-                          ? 'Tap to add status update'
-                          : '${_myStatus!.message} · ${_myStatus!.views} views · ${_myStatus!.likes} likes',
+                          ? _appCopy(context, 'Tap to add a status update')
+                          : '${_myStatus!.time} · ${_myStatus!.views} views',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFF75827D),
-                        fontSize: 12,
-                      ),
+                      style: TextStyle(color: mutedColor, fontSize: 12),
                     ),
                     trailing: _myStatus == null
                         ? const Icon(CupertinoIcons.add_circled, color: _green)
@@ -4529,31 +6702,74 @@ class _UpdatesPageState extends State<_UpdatesPage> {
                 ],
               ),
               const SizedBox(height: 20),
-              const _ListSectionLabel('RECENT UPDATES'),
-              _GroupedList(
-                children: [
-                  for (
-                    var index = 0;
-                    index < _recentStatuses.length;
-                    index++
-                  ) ...[
-                    if (index > 0) const _GroupDivider(),
-                    _StatusTile(
-                      initials: _recentStatuses[index].initials,
-                      name: _recentStatuses[index].name,
-                      time:
-                          '${_recentStatuses[index].time} · ${_recentStatuses[index].likes} likes',
-                      color: _recentStatuses[index].color,
-                      message: _recentStatuses[index].message,
-                      onTap: () => _openStatus(_recentStatuses[index]),
-                    ),
+              _ListSectionLabel(_appCopy(context, 'RECENT UPDATES')),
+              if (!widget.api.isAuthenticated)
+                _StatusNotice(
+                  message: _appCopy(
+                    context,
+                    'Sign in to see status updates from your contacts.',
+                  ),
+                )
+              else if (_loadingStatuses)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_recentStatuses.isEmpty)
+                _StatusNotice(message: _appCopy(context, 'No recent updates.'))
+              else
+                _GroupedList(
+                  children: [
+                    for (
+                      var index = 0;
+                      index < _recentStatuses.length;
+                      index++
+                    ) ...[
+                      if (index > 0) const _GroupDivider(),
+                      _StatusTile(
+                        initials: _recentStatuses[index].initials,
+                        name: _recentStatuses[index].name,
+                        time: _recentStatuses[index].time,
+                        color: _recentStatuses[index].color,
+                        message: _recentStatuses[index].message,
+                        hasViewed: _recentStatuses[index].hasViewed,
+                        imageUrl: _recentStatuses[index].mediaUrl,
+                        onTap: () => _openStatus(_recentStatuses[index]),
+                      ),
+                    ],
                   ],
-                ],
-              ),
+                ),
+              if (_viewedStatuses.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                _ListSectionLabel(_appCopy(context, 'VIEWED UPDATES')),
+                _GroupedList(
+                  children: [
+                    for (
+                      var index = 0;
+                      index < _viewedStatuses.length;
+                      index++
+                    ) ...[
+                      if (index > 0) const _GroupDivider(),
+                      _StatusTile(
+                        initials: _viewedStatuses[index].initials,
+                        name: _viewedStatuses[index].name,
+                        time: _viewedStatuses[index].time,
+                        color: _viewedStatuses[index].color,
+                        message: _viewedStatuses[index].message,
+                        hasViewed: true,
+                        imageUrl: _viewedStatuses[index].mediaUrl,
+                        onTap: () => _openStatus(_viewedStatuses[index]),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
               const SizedBox(height: 20),
               Row(
                 children: [
-                  const Expanded(child: _ListSectionLabel('COMMUNITIES')),
+                  Expanded(
+                    child: _ListSectionLabel(_appCopy(context, 'COMMUNITIES')),
+                  ),
                   TextButton.icon(
                     onPressed: _openCommunities,
                     icon: const Icon(CupertinoIcons.arrow_right, size: 15),
@@ -4598,8 +6814,16 @@ class _UpdatesPageState extends State<_UpdatesPage> {
             child: const Text('Write a text status'),
           ),
           CupertinoActionSheetAction(
+            onPressed: () => Navigator.pop(context, 'text_once'),
+            child: const Text('Write a view-once text status'),
+          ),
+          CupertinoActionSheetAction(
             onPressed: () => Navigator.pop(context, 'photo'),
             child: const Text('Choose a photo'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.pop(context, 'photo_once'),
+            child: const Text('Choose a view-once photo'),
           ),
         ],
         cancelButton: CupertinoActionSheetAction(
@@ -4610,10 +6834,12 @@ class _UpdatesPageState extends State<_UpdatesPage> {
     );
     if (!mounted) return;
     if (choice == 'text') await _addTextStatus();
+    if (choice == 'text_once') await _addTextStatus(viewOnce: true);
     if (choice == 'photo') await _pickPhotoStatus();
+    if (choice == 'photo_once') await _pickPhotoStatus(viewOnce: true);
   }
 
-  Future<void> _addTextStatus() async {
+  Future<void> _addTextStatus({bool viewOnce = false}) async {
     final controller = TextEditingController();
     final status = await showCupertinoDialog<String>(
       context: context,
@@ -4643,44 +6869,122 @@ class _UpdatesPageState extends State<_UpdatesPage> {
     );
     controller.dispose();
     if (status == null || status.isEmpty || !mounted) return;
-    setState(() {
-      _myStatus = _StatusUpdate(
-        name: 'You',
-        initials: 'A',
-        time: 'Just now',
-        color: const Color(0xFFE5EFFF),
-        message: status,
-        isMine: true,
+    if (!widget.api.isAuthenticated) {
+      _showSignInPrompt();
+      return;
+    }
+    try {
+      final created = await widget.api._createTextStatus(
+        status,
+        viewOnce: viewOnce,
       );
-    });
+      if (!mounted) return;
+      setState(() => _myStatus = created);
+    } on AirTextApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
   }
 
-  Future<void> _pickPhotoStatus() async {
+  Future<void> _pickPhotoStatus({bool viewOnce = false}) async {
+    if (!widget.api.isAuthenticated) {
+      _showSignInPrompt();
+      return;
+    }
     final photo = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (photo == null) return;
-    final bytes = await photo.readAsBytes();
-    if (!mounted) return;
-    setState(() {
-      _myStatus = _StatusUpdate(
-        name: 'You',
-        initials: 'A',
-        time: 'Just now',
-        color: const Color(0xFFE5EFFF),
-        message: 'Photo status',
-        isMine: true,
-        imageBytes: bytes,
+    try {
+      final created = await widget.api._createPhotoStatus(
+        photo,
+        viewOnce: viewOnce,
       );
-    });
+      if (!mounted) return;
+      setState(() => _myStatus = created);
+    } on AirTextApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
   }
 
-  void _openStatus(_StatusUpdate status) {
-    if (!status.isMine) status.views++;
-    Navigator.of(context).push(
-      CupertinoPageRoute<void>(
-        builder: (_) =>
-            _StatusViewerPage(status: status, onChanged: () => setState(() {})),
-      ),
+  void _showSignInPrompt() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Sign in to share status updates.')),
     );
+  }
+
+  Future<void> _openStatus(_StatusUpdate status) async {
+    var recordedView = status.isMine || status.hasViewed;
+    if (!recordedView && status.backendId != null) {
+      try {
+        await widget.api._markStatusViewed(status.backendId!);
+        recordedView = true;
+      } on AirTextApiException catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(error.message)));
+        }
+      }
+    }
+    if (!mounted) return;
+    if (!status.isMine && recordedView) {
+      setState(() {
+        status.hasViewed = true;
+        _recentStatuses.remove(status);
+        if (!_viewedStatuses.contains(status)) _viewedStatuses.add(status);
+      });
+    }
+
+    final navigator = Navigator.of(context);
+    try {
+      final route = navigator.push(
+        CupertinoPageRoute<void>(
+          builder: (_) => _StatusViewerPage(
+            status: status,
+            api: widget.api,
+            onReply: _replyToStatus,
+          ),
+        ),
+      );
+      unawaited(_setScreenPrivacy(status.screenshotProtected));
+      await route;
+    } finally {
+      await _setScreenPrivacy(false);
+    }
+    if (mounted && widget.api.isAuthenticated) await _loadStatuses();
+  }
+
+  Future<void> _replyToStatus(_StatusUpdate status, String text) async {
+    final email = status.authorEmail;
+    if (email == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Reply is unavailable for this status.')),
+      );
+      return;
+    }
+
+    try {
+      final conversation = await widget.api.createConversation(
+        email: email,
+        name: status.name,
+      );
+      final conversationId = conversation.backendId;
+      if (conversationId == null) return;
+      await widget.api.sendMessage(conversationId, text);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Reply sent to ${status.name}.')),
+        );
+      }
+    } on AirTextApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
   }
 
   Future<void> _openCommunities() async {
@@ -4701,6 +7005,8 @@ class _StatusTile extends StatelessWidget {
     required this.color,
     required this.message,
     required this.onTap,
+    this.hasViewed = false,
+    this.imageUrl,
   });
 
   final String initials;
@@ -4709,6 +7015,8 @@ class _StatusTile extends StatelessWidget {
   final Color color;
   final String message;
   final VoidCallback onTap;
+  final bool hasViewed;
+  final String? imageUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -4718,11 +7026,15 @@ class _StatusTile extends StatelessWidget {
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: _green, width: 2),
+          border: Border.all(
+            color: hasViewed ? const Color(0xFF9AA49F) : _green,
+            width: 2,
+          ),
         ),
         child: CircleAvatar(
           radius: 23,
           backgroundColor: color,
+          backgroundImage: imageUrl == null ? null : NetworkImage(imageUrl!),
           child: Text(
             initials,
             style: const TextStyle(
@@ -4746,11 +7058,29 @@ class _StatusTile extends StatelessWidget {
   }
 }
 
+class _StatusNotice extends StatelessWidget {
+  const _StatusNotice({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Text(
+        message,
+        style: TextStyle(color: isDark ? _silver : _lightMuted, fontSize: 13),
+      ),
+    );
+  }
+}
+
 class _MyStatusAvatar extends StatelessWidget {
-  const _MyStatusAvatar({required this.hasStatus, this.imageBytes});
+  const _MyStatusAvatar({required this.hasStatus, this.imageUrl});
 
   final bool hasStatus;
-  final Uint8List? imageBytes;
+  final String? imageUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -4763,10 +7093,8 @@ class _MyStatusAvatar extends StatelessWidget {
           CircleAvatar(
             radius: 25,
             backgroundColor: const Color(0xFFE3EAE4),
-            backgroundImage: imageBytes == null
-                ? null
-                : MemoryImage(imageBytes!),
-            child: imageBytes == null
+            backgroundImage: imageUrl == null ? null : NetworkImage(imageUrl!),
+            child: imageUrl == null
                 ? const Text('A', style: TextStyle(color: _ink))
                 : null,
           ),
@@ -4795,10 +7123,15 @@ class _MyStatusAvatar extends StatelessWidget {
 }
 
 class _StatusViewerPage extends StatefulWidget {
-  const _StatusViewerPage({required this.status, required this.onChanged});
+  const _StatusViewerPage({
+    required this.status,
+    required this.api,
+    required this.onReply,
+  });
 
   final _StatusUpdate status;
-  final VoidCallback onChanged;
+  final AirTextApi api;
+  final Future<void> Function(_StatusUpdate, String) onReply;
 
   @override
   State<_StatusViewerPage> createState() => _StatusViewerPageState();
@@ -4806,6 +7139,53 @@ class _StatusViewerPage extends StatefulWidget {
 
 class _StatusViewerPageState extends State<_StatusViewerPage> {
   final _commentController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadViewers());
+  }
+
+  Future<void> _loadViewers() async {
+    final statusId = widget.status.backendId;
+    if (!widget.status.isMine || statusId == null) return;
+    try {
+      final viewers = await widget.api.getStatusViewers(statusId);
+      final likers = await widget.api.getStatusLikers(statusId);
+      if (!mounted) return;
+      setState(() {
+        widget.status.viewerNames = viewers
+            .map((viewer) => viewer['name'] as String? ?? 'Air app user')
+            .toList();
+        widget.status.likerNames = likers
+            .map((liker) => liker['name'] as String? ?? 'Air app user')
+            .toList();
+      });
+    } on AirTextApiException {
+      return;
+    }
+  }
+
+  Future<void> _toggleLike() async {
+    final statusId = widget.status.backendId;
+    if (statusId == null) return;
+    try {
+      final result = widget.status.hasLiked
+          ? await widget.api.unlikeStatus(statusId)
+          : await widget.api.likeStatus(statusId);
+      if (!mounted) return;
+      setState(() {
+        widget.status.hasLiked = result['liked'] as bool? ?? false;
+        widget.status.likes =
+            result['likes_count'] as int? ?? widget.status.likes;
+      });
+    } on AirTextApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -4817,7 +7197,10 @@ class _StatusViewerPageState extends State<_StatusViewerPage> {
   Widget build(BuildContext context) {
     final status = widget.status;
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
         leading: const BackButton(),
         titleSpacing: 0,
         title: Row(
@@ -4849,12 +7232,18 @@ class _StatusViewerPageState extends State<_StatusViewerPage> {
       ),
       body: Column(
         children: [
+          const LinearProgressIndicator(
+            value: 1,
+            minHeight: 2,
+            color: Colors.white,
+            backgroundColor: Color(0x66FFFFFF),
+          ),
           Expanded(
             child: Container(
               width: double.infinity,
-              color: const Color(0xFF123B50),
+              color: status.color,
               alignment: Alignment.center,
-              child: status.imageBytes == null
+              child: status.mediaUrl == null
                   ? Padding(
                       padding: const EdgeInsets.all(28),
                       child: Text(
@@ -4867,76 +7256,73 @@ class _StatusViewerPageState extends State<_StatusViewerPage> {
                         ),
                       ),
                     )
-                  : Image.memory(status.imageBytes!, fit: BoxFit.contain),
+                  : Image.network(
+                      status.mediaUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const Center(
+                            child: Text(
+                              'Could not load status media.',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ),
+                    ),
             ),
           ),
           if (status.isMine) _buildInsights(status),
-          if (status.comments.isNotEmpty)
-            SizedBox(
-              height: 96,
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                itemCount: status.comments.length,
-                itemBuilder: (context, index) => Padding(
-                  padding: const EdgeInsets.only(bottom: 5),
-                  child: Text(
-                    status.comments[index],
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                ),
-              ),
-            ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-              child: Row(
-                children: [
-                  if (!status.isMine)
+          if (!status.isMine)
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: CupertinoTextField(
+                        controller: _commentController,
+                        placeholder: 'Reply',
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 11,
+                        ),
+                        style: const TextStyle(color: Colors.white),
+                        placeholderStyle: const TextStyle(
+                          color: Color(0xFFB8C1BC),
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF202A25),
+                          borderRadius: BorderRadius.circular(22),
+                        ),
+                        onSubmitted: (_) => _sendReply(),
+                      ),
+                    ),
+                    if (!widget.status.isMine)
+                      IconButton(
+                        tooltip: widget.status.hasLiked
+                            ? 'Unlike status'
+                            : 'Like status',
+                        onPressed: _toggleLike,
+                        icon: Icon(
+                          widget.status.hasLiked
+                              ? CupertinoIcons.heart_fill
+                              : CupertinoIcons.heart,
+                          color: widget.status.hasLiked
+                              ? const Color(0xFFFF667A)
+                              : _mint,
+                        ),
+                      ),
                     IconButton(
-                      tooltip: status.likedByMe
-                          ? 'Unlike status'
-                          : 'Like status',
-                      onPressed: _toggleLike,
-                      icon: Icon(
-                        status.likedByMe
-                            ? CupertinoIcons.heart_fill
-                            : CupertinoIcons.heart,
-                        color: status.likedByMe
-                            ? const Color(0xFFFF3B62)
-                            : _green,
+                      tooltip: 'Send reply',
+                      onPressed: _sendReply,
+                      icon: const Icon(
+                        CupertinoIcons.arrow_up_circle_fill,
+                        color: _mint,
                       ),
                     ),
-                  Expanded(
-                    child: CupertinoTextField(
-                      controller: _commentController,
-                      placeholder: 'Comment on status',
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 11,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF2F2F7),
-                        borderRadius: BorderRadius.circular(22),
-                      ),
-                      onSubmitted: (_) => _sendComment(),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Send comment',
-                    onPressed: _sendComment,
-                    icon: const Icon(
-                      CupertinoIcons.arrow_up_circle_fill,
-                      color: _green,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -4945,37 +7331,77 @@ class _StatusViewerPageState extends State<_StatusViewerPage> {
   Widget _buildInsights(_StatusUpdate status) {
     return Container(
       width: double.infinity,
-      color: Colors.white,
+      color: const Color(0xFF101714),
       padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'Status insights',
-            style: TextStyle(fontWeight: FontWeight.w700),
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 8),
           Row(
             children: [
               const Icon(CupertinoIcons.eye, size: 18, color: _green),
               const SizedBox(width: 6),
-              Text('${status.views} views'),
-              const SizedBox(width: 20),
-              const Icon(
-                CupertinoIcons.heart_fill,
-                size: 17,
-                color: Color(0xFFFF3B62),
+              Text(
+                '${status.views} views',
+                style: const TextStyle(color: Colors.white),
               ),
-              const SizedBox(width: 6),
-              Text('${status.likes} likes'),
             ],
           ),
+          Row(
+            children: [
+              const Icon(
+                CupertinoIcons.heart,
+                size: 18,
+                color: Color(0xFFFF667A),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '${status.likes} likes',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ],
+          ),
+          for (final name in status.viewerNames)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                name,
+                style: const TextStyle(color: Color(0xFFB8C1BC), fontSize: 12),
+              ),
+            ),
+          if (status.likerNames.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                'Liked by',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            for (final name in status.likerNames)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  name,
+                  style: const TextStyle(
+                    color: Color(0xFFB8C1BC),
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+          ],
           if (status.views == 0)
             const Padding(
               padding: EdgeInsets.only(top: 5),
               child: Text(
-                'Viewers will appear here when status activity is connected.',
-                style: TextStyle(fontSize: 11, color: Color(0xFF77777D)),
+                'Your contacts can view this update for 24 hours.',
+                style: TextStyle(fontSize: 11, color: Color(0xFFB8C1BC)),
               ),
             ),
         ],
@@ -4983,22 +7409,11 @@ class _StatusViewerPageState extends State<_StatusViewerPage> {
     );
   }
 
-  void _toggleLike() {
-    setState(() {
-      widget.status.likedByMe = !widget.status.likedByMe;
-      widget.status.likes += widget.status.likedByMe ? 1 : -1;
-    });
-    widget.onChanged();
-  }
-
-  void _sendComment() {
-    final comment = _commentController.text.trim();
-    if (comment.isEmpty) return;
-    setState(() {
-      widget.status.comments.add(comment);
-      _commentController.clear();
-    });
-    widget.onChanged();
+  Future<void> _sendReply() async {
+    final reply = _commentController.text.trim();
+    if (reply.isEmpty || widget.status.isMine) return;
+    _commentController.clear();
+    await widget.onReply(widget.status, reply);
   }
 }
 
@@ -5134,6 +7549,7 @@ class _ProfilePage extends StatefulWidget {
     required this.username,
     required this.about,
     required this.imageBytes,
+    required this.imageUrl,
     required this.onSave,
     required this.onOpenAccount,
   });
@@ -5142,6 +7558,7 @@ class _ProfilePage extends StatefulWidget {
   final String username;
   final String about;
   final Uint8List? imageBytes;
+  final String? imageUrl;
   final Future<void> Function(String, String, String, Uint8List?) onSave;
   final VoidCallback onOpenAccount;
 
@@ -5211,7 +7628,9 @@ class _ProfilePageState extends State<_ProfilePage> {
                         backgroundColor: const Color(0xFFE5EFFF),
                         foregroundColor: const Color(0xFF245781),
                         backgroundImage: _imageBytes == null
-                            ? null
+                            ? (widget.imageUrl == null
+                                  ? null
+                                  : NetworkImage(widget.imageUrl!))
                             : MemoryImage(_imageBytes!),
                         child: _imageBytes == null
                             ? Text(
@@ -5336,12 +7755,20 @@ class _ProfilePageState extends State<_ProfilePage> {
       return;
     }
     setState(() => _isSaving = true);
-    await widget.onSave(
-      name,
-      username.startsWith('@') ? username : '@$username',
-      _aboutController.text.trim(),
-      _imageBytes,
-    );
+    try {
+      await widget.onSave(
+        name,
+        username.startsWith('@') ? username : '@$username',
+        _aboutController.text.trim(),
+        _imageBytes,
+      );
+    } on AirTextApiException catch (error) {
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    }
     if (!mounted) return;
     setState(() => _isSaving = false);
     ScaffoldMessenger.of(context).showSnackBar(
@@ -5353,15 +7780,22 @@ class _ProfilePageState extends State<_ProfilePage> {
 class _AccountPage extends StatefulWidget {
   const _AccountPage({
     required this.api,
+    required this.appearance,
     required this.onAuthenticated,
+    required this.onSaveProfile,
     required this.onSignOut,
     required this.onDeleteLocalData,
+    required this.onDeleteAccount,
   });
 
   final AirTextApi api;
+  final AirTextAppearance appearance;
   final Future<void> Function(Map<String, dynamic> user) onAuthenticated;
+  final Future<void> Function(String name, String email, Uint8List? photo)
+  onSaveProfile;
   final Future<void> Function() onSignOut;
   final Future<void> Function() onDeleteLocalData;
+  final Future<void> Function() onDeleteAccount;
 
   @override
   State<_AccountPage> createState() => _AccountPageState();
@@ -5370,149 +7804,348 @@ class _AccountPage extends StatefulWidget {
 class _AccountPageState extends State<_AccountPage> {
   final _emailController = TextEditingController();
   final _codeController = TextEditingController();
-  bool _codeRequested = false;
+  final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _phoneCodeController = TextEditingController();
+  int _step = 0;
+  String _language = 'Kiswahili (Tanzania)';
+  String _countryCode = '+255';
+  bool _phoneCodeRequested = false;
   bool _isSubmitting = false;
+  Map<String, dynamic>? _pendingUser;
+  String? _loginChallenge;
+  String? _phoneHint;
+  Uint8List? _profilePhoto;
+
+  static const _countries = {
+    'Tanzania': '+255',
+    'Kenya': '+254',
+    'Uganda': '+256',
+    'United States': '+1',
+    'United Kingdom': '+44',
+  };
+
+  bool get _isSwahili => _language.toLowerCase().startsWith('kiswahili');
+
+  String _copy(String english, String swahili) =>
+      _isSwahili ? swahili : english;
+
+  @override
+  void initState() {
+    super.initState();
+    _step = widget.api.isAuthenticated ? 5 : 7;
+    _loadLanguage();
+  }
+
+  Future<void> _loadLanguage() async {
+    final preferences = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _language =
+          preferences.getString('airtext.language') ?? 'Kiswahili (Tanzania)';
+    });
+  }
 
   @override
   void dispose() {
     _emailController.dispose();
     _codeController.dispose();
+    _nameController.dispose();
+    _phoneController.dispose();
+    _phoneCodeController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(leading: const BackButton(), title: const Text('Account')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
-        children: [
-          const _ListSectionLabel('SIGN IN WITH EMAIL'),
-          _GroupedList(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 12,
-                ),
-                child: CupertinoTextField(
-                  controller: _emailController,
-                  enabled: !_isSubmitting,
-                  placeholder: 'name@example.com',
-                  keyboardType: TextInputType.emailAddress,
-                  autocorrect: false,
-                  textCapitalization: TextCapitalization.none,
-                  prefix: const Padding(
-                    padding: EdgeInsets.only(left: 8),
-                    child: Icon(CupertinoIcons.mail, size: 18),
-                  ),
-                ),
-              ),
-              if (_codeRequested) ...[
-                const _GroupDivider(),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
-                  child: CupertinoTextField(
-                    controller: _codeController,
-                    enabled: !_isSubmitting,
-                    placeholder: '6-digit email code',
-                    keyboardType: TextInputType.number,
-                    maxLength: 6,
-                    prefix: const Padding(
-                      padding: EdgeInsets.only(left: 8),
-                      child: Icon(CupertinoIcons.lock, size: 18),
-                    ),
-                  ),
-                ),
-              ],
-            ],
+    if (_step == 5 || _step == 7) {
+      return Scaffold(
+        appBar: AppBar(
+          leading: const BackButton(),
+          title: Text(_appCopy(context, 'Account')),
+        ),
+        body: _step == 5 ? _buildAccountSettings() : _buildAccountAccess(),
+      );
+    }
+
+    final stepNumber = _step == 6 ? 2 : (_step < 3 ? _step : 3);
+    return CupertinoTheme(
+      data: CupertinoTheme.of(context)
+          .copyWith(primaryColor: const Color(0xFF00A99D)),
+      child: CupertinoPageScaffold(
+        backgroundColor: CupertinoColors.systemBackground.resolveFrom(context),
+        navigationBar: CupertinoNavigationBar(
+          middle: Text(
+            _step == 0
+                ? 'AirText'
+                : _copy('Step $stepNumber of 3', 'Hatua $stepNumber kati ya 3'),
           ),
-          const SizedBox(height: 10),
-          Text(
-            _codeRequested
-                ? 'Enter the one-time code sent to your email. It expires after 10 minutes.'
-                : 'A one-time code will be sent to this email. No password is stored on this device.',
-            style: TextStyle(
-              color: Color(0xFF6D6D72),
-              fontSize: 12,
-              height: 1.4,
-            ),
+          leading: CupertinoNavigationBarBackButton(
+            onPressed: () => Navigator.of(context).pop(),
           ),
-          const SizedBox(height: 10),
-          FilledButton.icon(
-            onPressed: _isSubmitting
-                ? null
-                : _codeRequested
-                ? _verifyOtp
-                : _requestOtp,
-            icon: _isSubmitting
-                ? const SizedBox.square(
-                    dimension: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(
-                    _codeRequested
-                        ? CupertinoIcons.checkmark_shield
-                        : CupertinoIcons.paperplane,
-                  ),
-            label: Text(_codeRequested ? 'Verify and sign in' : 'Send code'),
-          ),
-          const SizedBox(height: 24),
-          const _ListSectionLabel('THIS DEVICE'),
-          _GroupedList(
-            children: [
-              ListTile(
-                leading: const Icon(
-                  CupertinoIcons.arrow_right_square,
-                  color: _green,
-                ),
-                title: const Text('Sign out'),
-                subtitle: const Text(
-                  'Sign out of Air app and clear this device profile',
-                ),
-                onTap: () => _confirmAction(
-                  title: 'Sign out?',
-                  message: 'Your Air app session and local profile will be cleared from this device.',
-                  action: 'Sign out',
-                  onConfirm: widget.onSignOut,
-                ),
-              ),
-              const _GroupDivider(),
-              ListTile(
-                leading: const Icon(
-                  CupertinoIcons.delete,
-                  color: Color(0xFFFF3B30),
-                ),
-                title: const Text('Delete local app data'),
-                subtitle: const Text(
-                  'Remove this device profile and saved contacts',
-                ),
-                titleTextStyle: const TextStyle(
-                  color: Color(0xFFFF3B30),
-                  fontSize: 15,
-                ),
-                onTap: () => _confirmAction(
-                  title: 'Delete local data?',
-                  message: 'This removes the profile and saved contacts from this device, not the Air app account.',
-                  action: 'Delete',
-                  onConfirm: widget.onDeleteLocalData,
-                  destructive: true,
-                ),
-              ),
-            ],
-          ),
-        ],
+          trailing: _step > 0
+              ? CupertinoButton(
+                  padding: EdgeInsets.zero,
+                  onPressed: _isSubmitting ? null : _goBack,
+                  child: Text(_copy('Back', 'Rudi')),
+                )
+              : null,
+        ),
+        child: _buildOnboardingStep(),
       ),
     );
   }
 
+  Widget _buildOnboardingStep() {
+    return switch (_step) {
+      0 => _buildWelcomeStep(),
+      1 => _buildEmailStep(),
+      2 => _buildEmailCodeStep(),
+      3 => _buildProfileStep(),
+      4 => _buildPhoneStep(),
+      6 => _buildLoginPhoneStep(),
+      _ => const SizedBox.shrink(),
+    };
+  }
+
+  String get _formattedPhoneNumber {
+    final nationalNumber = _phoneController.text
+        .replaceAll(RegExp(r'\D'), '')
+        .replaceFirst(RegExp(r'^0+'), '');
+    return '$_countryCode$nationalNumber';
+  }
+
+  Future<void> _setLanguage(String value) async {
+    setState(() => _language = value);
+    await widget.appearance.setLanguage(value);
+  }
+
+  Future<void> _chooseLanguage() async {
+    final selected = await Navigator.of(context).push<String>(
+      CupertinoPageRoute<String>(
+        builder: (_) => LanguageSelectorScreen(api: widget.api),
+      ),
+    );
+    if (selected != null && selected.isNotEmpty) {
+      await _setLanguage(selected);
+    }
+  }
+
+  Widget _buildWelcomeStep() {
+    return WelcomeScreen(
+      language: _language,
+      onChooseLanguage: _chooseLanguage,
+      onContinue: () => setState(() => _step = 1),
+    );
+  }
+
+  Widget _buildEmailStep() {
+    return EmailRegisterScreen(
+      controller: _emailController,
+      isSwahili: _isSwahili,
+      isSubmitting: _isSubmitting,
+      onSubmit: _requestOtp,
+    );
+  }
+
+  Widget _buildEmailCodeStep() {
+    return EmailOtpScreen(
+      email: _emailController.text.trim(),
+      controller: _codeController,
+      isSwahili: _isSwahili,
+      isSubmitting: _isSubmitting,
+      onVerify: _verifyOtp,
+      onResend: _requestOtp,
+    );
+  }
+
+  Widget _buildProfileStep() {
+    return ProfileSetupScreen(
+      controller: _nameController,
+      photo: _profilePhoto,
+      isSwahili: _isSwahili,
+      isSubmitting: _isSubmitting,
+      onPickPhoto: _pickProfilePhoto,
+      onContinue: _saveProfileAndContinue,
+    );
+  }
+
+  Widget _buildPhoneStep() {
+    return PhoneVerifyScreen(
+      phoneController: _phoneController,
+      codeController: _phoneCodeController,
+      countryCode: _countryCode,
+      countries: _countries,
+      codeRequested: _phoneCodeRequested,
+      isLoginChallenge: false,
+      phoneHint: null,
+      isSwahili: _isSwahili,
+      isSubmitting: _isSubmitting,
+      onCountryChanged: (value) => setState(() => _countryCode = value),
+      onPhoneChanged: (_) => setState(() {}),
+      onSubmit: _phoneCodeRequested
+          ? () => _verifyPhoneOtp(_formattedPhoneNumber)
+          : () => _requestPhoneOtp(_formattedPhoneNumber),
+    );
+  }
+
+  Widget _buildLoginPhoneStep() {
+    return PhoneVerifyScreen(
+      phoneController: _phoneController,
+      codeController: _phoneCodeController,
+      countryCode: _countryCode,
+      countries: _countries,
+      codeRequested: true,
+      isLoginChallenge: true,
+      phoneHint: _phoneHint,
+      isSwahili: _isSwahili,
+      isSubmitting: _isSubmitting,
+      onCountryChanged: (_) {},
+      onPhoneChanged: (_) {},
+      onSubmit: _verifyPhoneLoginOtp,
+    );
+  }
+
+  Widget _buildAccountSettings() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
+      children: [
+        const _ListSectionLabel('THIS DEVICE'),
+        _GroupedList(
+          children: [
+            ListTile(
+              leading: const Icon(
+                CupertinoIcons.arrow_right_square,
+                color: _green,
+              ),
+              title: const Text('Sign out'),
+              subtitle: const Text(
+                'End this device session; your account and data stay saved',
+              ),
+              onTap: () => _confirmAction(
+                title: 'Sign out?',
+                message: 'Only this device will be signed out. Your account, profile, contacts, conversations and messages remain saved. Sign in again with the same email to restore your account.',
+                action: 'Sign out',
+                onConfirm: widget.onSignOut,
+              ),
+            ),
+            const _GroupDivider(),
+            ListTile(
+              leading: const Icon(
+                CupertinoIcons.person_crop_circle_badge_xmark,
+                color: Color(0xFFFF3B30),
+              ),
+              title: const Text('Delete account'),
+              subtitle: const Text(
+                'Permanently remove your AirText account and server data',
+              ),
+              titleTextStyle: const TextStyle(
+                color: Color(0xFFFF3B30),
+                fontSize: 15,
+              ),
+              onTap: _confirmAccountDeletion,
+            ),
+            const _GroupDivider(),
+            ListTile(
+              leading: const Icon(
+                CupertinoIcons.delete,
+                color: Color(0xFFFF3B30),
+              ),
+              title: const Text('Delete local app data'),
+              subtitle: const Text(
+                'Remove this device profile and saved contacts',
+              ),
+              titleTextStyle: const TextStyle(
+                color: Color(0xFFFF3B30),
+                fontSize: 15,
+              ),
+              onTap: () => _confirmAction(
+                title: 'Delete local data?',
+                message: 'This removes the profile and saved contacts from this device, not the Air app account.',
+                action: 'Delete',
+                onConfirm: widget.onDeleteLocalData,
+                destructive: true,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAccountAccess() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
+      children: [
+        const _ListSectionLabel('ACCOUNT ACCESS'),
+        _GroupedList(
+          children: [
+            ListTile(
+              leading: const Icon(CupertinoIcons.person_badge_plus),
+              title: const Text('Create an account'),
+              subtitle: const Text('Verify your email and phone number'),
+              onTap: () => setState(() => _step = 0),
+            ),
+            const _GroupDivider(),
+            ListTile(
+              leading: const Icon(CupertinoIcons.lock),
+              title: const Text('Sign in'),
+              subtitle: const Text('Continue with your verified email'),
+              onTap: () => setState(() => _step = 1),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        const _ListSectionLabel('THIS DEVICE'),
+        _GroupedList(
+          children: [
+            ListTile(
+              leading: const Icon(CupertinoIcons.delete),
+              title: const Text('Delete local app data'),
+              subtitle: const Text('Remove this device profile and contacts'),
+              onTap: () => _confirmAction(
+                title: 'Delete local data?',
+                message: 'This removes the profile and saved contacts from this device.',
+                action: 'Delete',
+                onConfirm: widget.onDeleteLocalData,
+                destructive: true,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickProfilePhoto() async {
+    final photo = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 82,
+      maxWidth: 720,
+    );
+    if (photo == null) return;
+    final bytes = await photo.readAsBytes();
+    if (mounted) setState(() => _profilePhoto = bytes);
+  }
+
+  void _goBack() {
+    setState(() {
+      if (_step == 6) {
+        _step = 2;
+      } else if (_step == 2) {
+        _step = 1;
+      } else if (_step > 0) {
+        _step--;
+      }
+    });
+  }
+
   Future<void> _requestOtp() async {
     final email = _emailController.text.trim();
-    if (email.isEmpty) {
-      _showMessage('Enter your email address.');
+    if (!email.contains('@') || !email.contains('.')) {
+      _showMessage(
+        _copy('Enter a valid email address.', 'Weka barua pepe sahihi.'),
+      );
       return;
     }
 
@@ -5520,8 +8153,15 @@ class _AccountPageState extends State<_AccountPage> {
     try {
       await widget.api.requestOtp(email);
       if (!mounted) return;
-      setState(() => _codeRequested = true);
-      _showMessage('If the address is valid, a sign-in code has been sent.');
+      setState(() {
+        _step = 2;
+      });
+      _showMessage(
+        _copy(
+          'A verification code has been sent.',
+          'Msimbo wa uthibitishaji umetumwa.',
+        ),
+      );
     } on AirTextApiException catch (error) {
       if (mounted) _showMessage(error.message);
     } finally {
@@ -5539,7 +8179,101 @@ class _AccountPageState extends State<_AccountPage> {
 
     setState(() => _isSubmitting = true);
     try {
-      final user = await widget.api.verifyOtp(email: email, code: code);
+      final response = await widget.api.verifyOtp(email: email, code: code);
+      final user = response['user'] as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() {
+        _pendingUser = user;
+        if (response['requires_phone_verification'] == true) {
+          _loginChallenge = response['challenge'] as String?;
+          _phoneHint = response['phone_hint'] as String?;
+          _step = 6;
+        } else {
+          _nameController.text = user['name'] as String? ?? '';
+          _step = 3;
+        }
+      });
+    } on AirTextApiException catch (error) {
+      if (mounted) _showMessage(error.message);
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _saveProfileAndContinue() async {
+    final name = _nameController.text.trim();
+    final user = _pendingUser;
+    if (name.isEmpty || user == null) {
+      _showMessage(
+        _copy('Enter your name to continue.', 'Weka jina lako ili uendelee.'),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      final updatedUser = await widget.api.updateProfile(name);
+      await widget.onSaveProfile(
+        name,
+        updatedUser['email'] as String? ?? _emailController.text.trim(),
+        _profilePhoto,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pendingUser = updatedUser;
+        _step = 4;
+      });
+    } on AirTextApiException catch (error) {
+      if (mounted) _showMessage(error.message);
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _requestPhoneOtp(String phoneNumber) async {
+    if (phoneNumber.replaceAll(RegExp(r'\D'), '').length < 8) {
+      _showMessage(
+        _copy('Enter a valid phone number.', 'Weka namba sahihi ya simu.'),
+      );
+      return;
+    }
+    setState(() => _isSubmitting = true);
+    try {
+      await widget.api.requestPhoneOtp(phoneNumber);
+      if (!mounted) return;
+      setState(() => _phoneCodeRequested = true);
+      _showMessage(
+        _copy(
+          'A verification code has been sent by SMS.',
+          'Msimbo wa uthibitishaji umetumwa kwa SMS.',
+        ),
+      );
+    } on AirTextApiException catch (error) {
+      if (mounted) _showMessage(error.message);
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _verifyPhoneLoginOtp() async {
+    final challenge = _loginChallenge;
+    final code = _phoneCodeController.text.trim();
+    if (challenge == null || code.length != 6) {
+      _showMessage(
+        _copy(
+          'Enter the 6-digit SMS code.',
+          'Weka msimbo wa SMS wa tarakimu 6.',
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      final user = await widget.api.verifyPhoneLoginOtp(
+        challenge: challenge,
+        code: code,
+      );
       await widget.onAuthenticated(user);
       if (mounted) Navigator.of(context).pop();
     } on AirTextApiException catch (error) {
@@ -5547,6 +8281,41 @@ class _AccountPageState extends State<_AccountPage> {
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
+  }
+
+  Future<void> _verifyPhoneOtp(String phoneNumber) async {
+    final code = _phoneCodeController.text.trim();
+    if (code.length != 6) {
+      _showMessage(
+        _copy(
+          'Enter the 6-digit SMS code.',
+          'Weka msimbo wa SMS wa tarakimu 6.',
+        ),
+      );
+      return;
+    }
+    setState(() => _isSubmitting = true);
+    try {
+      await widget.api.verifyPhoneOtp(phoneNumber: phoneNumber, code: code);
+      if (_pendingUser == null) {
+        if (mounted) setState(() => _step = 5);
+      } else {
+        await _finishOnboarding();
+      }
+    } on AirTextApiException catch (error) {
+      if (mounted) _showMessage(error.message);
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _finishOnboarding() async {
+    final user = _pendingUser;
+    if (user == null) return;
+    await widget.onAuthenticated(user);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool('airtext.onboarding-complete', true);
+    if (mounted) Navigator.of(context).pop();
   }
 
   void _showMessage(String message) {
@@ -5580,6 +8349,94 @@ class _AccountPageState extends State<_AccountPage> {
       ),
     );
     if (confirmed == true) await onConfirm();
+  }
+
+  Future<void> _confirmAccountDeletion() async {
+    final confirmationController = TextEditingController();
+    final confirmationPhrase = _isSwahili ? 'FUTA' : 'DELETE';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          return AlertDialog(
+            icon: const Icon(
+              CupertinoIcons.exclamationmark_triangle_fill,
+              color: Color(0xFFFF3B30),
+              size: 32,
+            ),
+            title: Text(
+              _copy('Permanently delete account?', 'Futa akaunti kabisa?'),
+            ),
+            content: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 520,
+                maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.68,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _copy(
+                        'This action cannot be undone. AirText will permanently remove your account profile and sign-in sessions, contacts, conversations and messages, statuses and uploaded media, channels and posts, call records, device notifications, subscriptions, and other account-linked data from the active system database. You will be signed out on every device. To use AirText again, you must register a new account; this deleted account cannot be restored.',
+                        'Hatua hii haiwezi kutenguliwa. AirText itafuta kabisa wasifu wa akaunti yako na vipindi vya kuingia, anwani, mazungumzo na ujumbe, status na faili ulizopakia, channels na machapisho, kumbukumbu za simu, arifa za vifaa, subscriptions, pamoja na data nyingine zilizounganishwa na akaunti yako kwenye mfumo hai. Utaondolewa kwenye akaunti kwenye vifaa vyote. Ili kutumia AirText tena utahitaji kusajili akaunti mpya; akaunti hii iliyofutwa haiwezi kurejeshwa.',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _copy(
+                        'This does not erase copies other people saved outside AirText or data retained in backups according to the service retention policy.',
+                        'Hii haifuti nakala ambazo watu wengine walihifadhi nje ya AirText, wala data inayoweza kubaki kwenye backups kulingana na sera ya muda wa kuhifadhi data.',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _copy(
+                        'Type $confirmationPhrase to confirm permanent deletion.',
+                        'Andika $confirmationPhrase kuthibitisha ufutaji wa kudumu.',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    CupertinoTextField(
+                      controller: confirmationController,
+                      placeholder: confirmationPhrase,
+                      autocorrect: false,
+                      onChanged: (_) => setDialogState(() {}),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(_copy('Cancel', 'Ghairi')),
+              ),
+              TextButton(
+                onPressed:
+                    confirmationController.text.trim() == confirmationPhrase
+                    ? () => Navigator.pop(dialogContext, true)
+                    : null,
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFD32F2F),
+                ),
+                child: Text(_copy('Delete account', 'Futa akaunti')),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    confirmationController.dispose();
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isSubmitting = true);
+    try {
+      await widget.onDeleteAccount();
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 }
 
@@ -5653,6 +8510,22 @@ class _AppearancePage extends StatelessWidget {
               ],
             ),
             CupertinoFormSection.insetGrouped(
+              header: const Text('HOME SCREEN ICON'),
+              children: [
+                CupertinoListTile(
+                  leading: Image.asset(
+                    'assets/airtext_app_icon.png',
+                    width: 32,
+                    height: 32,
+                  ),
+                  title: const Text('Air app icon'),
+                  additionalInfo: const Text('Choose icon'),
+                  trailing: const CupertinoListTileChevron(),
+                  onTap: () => _chooseLauncherIcon(context),
+                ),
+              ],
+            ),
+            CupertinoFormSection.insetGrouped(
               header: const Text('MESSAGES'),
               children: [
                 CupertinoListTile(
@@ -5671,6 +8544,63 @@ class _AppearancePage extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _chooseLauncherIcon(BuildContext context) async {
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return;
+    }
+
+    try {
+      if (!await DynamicAppIconFlutterPlus.supportsAlternateIcons) return;
+      final availableIcons =
+          await DynamicAppIconFlutterPlus.getAvailableIcons();
+      if (!context.mounted) return;
+      final choice = await showCupertinoModalPopup<String>(
+        context: context,
+        builder: (context) => CupertinoActionSheet(
+          title: const Text('Home screen icon'),
+          actions: [
+            CupertinoActionSheetAction(
+              onPressed: () => Navigator.pop(context, 'default'),
+              child: const Text('Air app'),
+            ),
+            if (availableIcons.contains('midnight'))
+              CupertinoActionSheetAction(
+                onPressed: () => Navigator.pop(context, 'midnight'),
+                child: const Text('Air app Midnight'),
+              ),
+          ],
+          cancelButton: CupertinoActionSheetAction(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ),
+      );
+      if (choice == null) return;
+
+      await DynamicAppIconFlutterPlus.setAlternateIconName(
+        choice == 'default' ? null : choice,
+        showAlert: true,
+        deferUntilBackground: defaultTargetPlatform == TargetPlatform.android,
+      );
+    } on PlatformException catch (error) {
+      if (!context.mounted) return;
+      await showCupertinoDialog<void>(
+        context: context,
+        builder: (context) => CupertinoAlertDialog(
+          title: const Text('Icon could not be changed'),
+          content: Text(error.message ?? 'The selected icon is unavailable.'),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 }
 
@@ -5810,12 +8740,14 @@ class _ChatThemePage extends StatelessWidget {
 
 class _SettingsPage extends StatelessWidget {
   const _SettingsPage({
+    required this.api,
     required this.appearance,
     required this.onOpenProfile,
     required this.onOpenAccount,
     required this.onOpenAppearance,
   });
 
+  final AirTextApi api;
   final AirTextAppearance appearance;
   final VoidCallback onOpenProfile;
   final VoidCallback onOpenAccount;
@@ -5823,96 +8755,162 @@ class _SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(22, 24, 22, 18),
-          child: Text(
-            'Settings',
-            style: TextStyle(
-              color: _ink,
-              fontSize: 29,
-              fontWeight: FontWeight.w800,
+    return Container(
+      color: const Color(0xFFF6F3EE),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(22, 24, 22, 18),
+            child: Text(
+              _appCopy(context, 'Settings'),
+              style: TextStyle(
+                color: _ink,
+                fontSize: 29,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
-        ),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-            children: [
-              const _ListSectionLabel('ACCOUNT'),
-              _GroupedList(
-                children: [
-                  _SettingsTile(
-                    icon: Icons.person_outline,
-                    title: 'Profile',
-                    subtitle: 'Photo, username and about',
-                    onTap: onOpenProfile,
-                  ),
-                  const _GroupDivider(),
-                  _SettingsTile(
-                    icon: Icons.manage_accounts_outlined,
-                    title: 'Account',
-                    subtitle: 'Registration, sign out and data',
-                    onTap: onOpenAccount,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              const _ListSectionLabel('DISPLAY'),
-              _GroupedList(
-                children: [
-                  _SettingsTile(
-                    icon: Icons.palette_outlined,
-                    title: 'Appearance',
-                    subtitle: '${appearance.themeMode.name} · Chat Theme',
-                    onTap: onOpenAppearance,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              const _ListSectionLabel('MESSAGING'),
-              _GroupedList(
-                children: [
-                  _SettingsTile(
-                    icon: Icons.sms_outlined,
-                    title: 'GSM & SMS Protocol',
-                    subtitle: 'Manage offline messaging',
-                    onTap: () => _openSettings(context, 'GSM & SMS Protocol'),
-                  ),
-                  const _GroupDivider(),
-                  _SettingsTile(
-                    icon: Icons.notifications_none,
-                    title: 'Notifications',
-                    subtitle: 'Message & call tones',
-                    onTap: () => _openSettings(context, 'Notifications'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              const _ListSectionLabel('MORE'),
-              _GroupedList(
-                children: [
-                  _SettingsTile(
-                    icon: Icons.info_outline,
-                    title: 'Help & About Air app',
-                    subtitle: 'Payload protocol updates',
-                    onTap: () => _openSettings(context, 'Help & About Air app'),
-                  ),
-                ],
-              ),
-            ],
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+              children: [
+                _ListSectionLabel(_appCopy(context, 'ACCOUNT')),
+                _GroupedList(
+                  children: [
+                    _SettingsTile(
+                      icon: Icons.person_outline,
+                      title: _appCopy(context, 'Profile'),
+                      subtitle: _appCopy(context, 'Photo, username and about'),
+                      onTap: onOpenProfile,
+                    ),
+                    const _GroupDivider(),
+                    _SettingsTile(
+                      icon: Icons.manage_accounts_outlined,
+                      title: _appCopy(context, 'Account'),
+                      subtitle: _appCopy(
+                        context,
+                        'Registration, sign out and data',
+                      ),
+                      onTap: onOpenAccount,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _ListSectionLabel(_appCopy(context, 'DISPLAY')),
+                _GroupedList(
+                  children: [
+                    _SettingsTile(
+                      icon: Icons.palette_outlined,
+                      title: _appCopy(context, 'Appearance'),
+                      subtitle:
+                          '${appearance.themeMode.name} · ${_appCopy(context, 'Chat Theme')}',
+                      onTap: onOpenAppearance,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _ListSectionLabel(_appCopy(context, 'MESSAGING')),
+                _GroupedList(
+                  children: [
+                    _SettingsTile(
+                      icon: Icons.sms_outlined,
+                      title: _appCopy(context, 'GSM & SMS Protocol'),
+                      subtitle: _appCopy(context, 'Manage offline messaging'),
+                      onTap: () => _openSettings(context, 'GSM & SMS Protocol'),
+                    ),
+                    const _GroupDivider(),
+                    _SettingsTile(
+                      icon: Icons.notifications_none,
+                      title: _appCopy(context, 'Notifications'),
+                      subtitle: _appCopy(context, 'Message & call tones'),
+                      onTap: () => _openSettings(context, 'Notifications'),
+                    ),
+                    const _GroupDivider(),
+                    _SettingsTile(
+                      icon: Icons.storage_outlined,
+                      title: _appCopy(context, 'Storage and data'),
+                      subtitle: _appCopy(
+                        context,
+                        'Chats, media, auto-download',
+                      ),
+                      onTap: () => _openSettings(context, 'Storage and data'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _ListSectionLabel(_appCopy(context, 'PRIVACY & ACCESS')),
+                _GroupedList(
+                  children: [
+                    _SettingsTile(
+                      icon: Icons.privacy_tip_outlined,
+                      title: _appCopy(context, 'Privacy'),
+                      subtitle: _appCopy(
+                        context,
+                        'Last seen, profile visibility',
+                      ),
+                      onTap: () => _openSettings(context, 'Privacy'),
+                    ),
+                    const _GroupDivider(),
+                    _SettingsTile(
+                      icon: Icons.accessibility_new_outlined,
+                      title: _appCopy(context, 'Accessibility'),
+                      subtitle: _appCopy(
+                        context,
+                        'Text size, motion and display',
+                      ),
+                      onTap: () => _openSettings(context, 'Accessibility'),
+                    ),
+                    const _GroupDivider(),
+                    _SettingsTile(
+                      icon: Icons.language_outlined,
+                      title: _appCopy(context, 'App language'),
+                      subtitle: appearance.language,
+                      onTap: () => _openSettings(context, 'App language'),
+                    ),
+                    const _GroupDivider(),
+                    _SettingsTile(
+                      icon: Icons.group_add_outlined,
+                      title: _appCopy(context, 'Invite friend'),
+                      subtitle: _appCopy(
+                        context,
+                        'Share AirText with a friend',
+                      ),
+                      onTap: () => _openSettings(context, 'Invite friend'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _ListSectionLabel(_appCopy(context, 'MORE')),
+                _GroupedList(
+                  children: [
+                    _SettingsTile(
+                      icon: Icons.info_outline,
+                      title: _appCopy(context, 'Help & feedback'),
+                      subtitle: _appCopy(
+                        context,
+                        'Reports, policy and support',
+                      ),
+                      onTap: () => _openSettings(context, 'Help & feedback'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   void _openSettings(BuildContext context, String section) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _SettingsDetailPage(section: section),
+        builder: (_) => _SettingsDetailPage(
+          section: section,
+          api: api,
+          appearance: appearance,
+        ),
       ),
     );
   }
@@ -5967,9 +8965,15 @@ class _SettingsTile extends StatelessWidget {
 }
 
 class _SettingsDetailPage extends StatefulWidget {
-  const _SettingsDetailPage({required this.section});
+  const _SettingsDetailPage({
+    required this.section,
+    required this.api,
+    required this.appearance,
+  });
 
   final String section;
+  final AirTextApi api;
+  final AirTextAppearance appearance;
 
   @override
   State<_SettingsDetailPage> createState() => _SettingsDetailPageState();
@@ -5977,17 +8981,498 @@ class _SettingsDetailPage extends StatefulWidget {
 
 class _SettingsDetailPageState extends State<_SettingsDetailPage> {
   bool _offlineMessaging = true;
+  bool _deliveryReceipts = true;
+  String _defaultPayloadPrefix = 'MSG:';
+  bool _useLessDataForCalls = false;
+  String _uploadQuality = 'hd';
+  String _autoDownloadQuality = 'auto';
+  String _mobileDataDownloads = 'photos';
+  String _wifiDownloads = 'all';
+  String _roamingDownloads = 'none';
+  bool _gatewayConfigured = false;
+  bool _testingGateway = false;
+  String? _gatewaySender;
+  String _gatewayStatus = 'Not checked';
   bool _messageSounds = true;
   bool _callSounds = true;
+  String _messageTone = 'Chime';
+  String _callTone = 'Soft echo';
   bool _twoStepVerification = false;
+  bool _autoDownloadPhotos = true;
+  bool _autoDownloadVideos = true;
+  bool _autoDownloadStickers = false;
+  bool _autoDownloadVoiceNotes = true;
+  bool _largeText = false;
+  bool _reducedMotion = true;
+  bool _highContrast = false;
+  String _appLanguage = 'Kiswahili (Tanzania)';
+  String _lastSeen = 'Everyone';
+  String _profilePicture = 'My contacts';
+  String _about = 'My contacts';
+  String _links = 'My contacts';
+  String _status = 'Everyone';
+  bool _defaultMessageTimer = true;
+  bool _groups = true;
+  bool _liveLocation = false;
+  bool _contactBlock = true;
+  bool _appLock = false;
+  bool _chatLock = false;
+  bool _allowCameraEffects = true;
+  bool _advanced = false;
+  bool _privacyCheckup = true;
+  String _cacheSize = 'Calculating...';
+  String _deviceName = 'Detecting device...';
+  String _deviceSystem = 'Reading operating system';
+  Map<String, dynamic>? _storageSummary;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadSavedLanguage());
+    unawaited(_loadSavedSettings());
+    unawaited(_loadCacheSize());
+    unawaited(_loadGatewayConfiguration());
+    unawaited(_loadStorageSummary());
+    unawaited(_loadDeviceInfo());
+  }
+
+  Future<void> _loadDeviceInfo() async {
+    try {
+      final info = await _deviceInfoChannel.invokeMapMethod<String, String>(
+        'getDeviceInfo',
+      );
+      if (!mounted || info == null) return;
+      setState(() {
+        _deviceName = '${info['manufacturer'] ?? 'Device'} ${info['model'] ?? ''}'
+            .trim();
+        _deviceSystem = info['system'] ?? 'Android';
+      });
+    } on PlatformException {
+      if (!mounted) return;
+      setState(() {
+        _deviceName = switch (defaultTargetPlatform) {
+          TargetPlatform.iOS => 'Apple device',
+          TargetPlatform.android => 'Android device',
+          _ => 'This device',
+        };
+        _deviceSystem = Platform.operatingSystem;
+      });
+    } on MissingPluginException {
+      if (!mounted) return;
+      setState(() {
+        _deviceName = 'This device';
+        _deviceSystem = Platform.operatingSystem;
+      });
+    }
+  }
+
+  Future<void> _loadSavedSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final localStorageSettings = await StorageSettingsService.loadSettings();
+    final photos = await StorageSettingsService.getPhotosDownload();
+    final videos = await StorageSettingsService.getVideosDownload();
+    final stickers = await StorageSettingsService.getStickersDownload();
+    final voice = await StorageSettingsService.getVoiceNotesDownload();
+    Map<String, dynamic>? remotePreferences;
+    if (widget.api.isAuthenticated) {
+      try {
+        remotePreferences = await widget.api.getUserPreferences();
+      } on AirTextApiException {
+        remotePreferences = null;
+      }
+    }
+    if (!mounted) return;
+    final rawRemoteMessaging = remotePreferences?['messaging_settings'];
+    final remoteMessaging = rawRemoteMessaging is Map<String, dynamic>
+        ? rawRemoteMessaging
+        : <String, dynamic>{};
+    final rawRemoteStorage = remotePreferences?['storage_settings'];
+    final remoteStorage = rawRemoteStorage is Map<String, dynamic>
+        ? rawRemoteStorage
+        : <String, dynamic>{};
+    setState(() {
+      _offlineMessaging =
+          remoteMessaging['sms_fallback_enabled'] as bool? ??
+          prefs.getBool('sms_fallback_enabled') ??
+          true;
+      _deliveryReceipts =
+          remoteMessaging['delivery_receipts'] as bool? ??
+          prefs.getBool('sms_delivery_receipts') ??
+          true;
+      _defaultPayloadPrefix =
+          remoteMessaging['default_payload_prefix'] as String? ??
+          prefs.getString('sms_payload_prefix') ??
+          'MSG:';
+      _useLessDataForCalls =
+          remoteStorage['use_less_data_for_calls'] as bool? ??
+          localStorageSettings['use_less_data_for_calls'] as bool;
+      _uploadQuality =
+          remoteStorage['upload_quality'] as String? ??
+          localStorageSettings['upload_quality'] as String;
+      _autoDownloadQuality =
+          remoteStorage['auto_download_quality'] as String? ??
+          localStorageSettings['auto_download_quality'] as String;
+      _mobileDataDownloads =
+          remoteStorage['mobile_data_downloads'] as String? ??
+          localStorageSettings['mobile_data_downloads'] as String;
+      _wifiDownloads =
+          remoteStorage['wifi_downloads'] as String? ??
+          localStorageSettings['wifi_downloads'] as String;
+      _roamingDownloads =
+          remoteStorage['roaming_downloads'] as String? ??
+          localStorageSettings['roaming_downloads'] as String;
+      _autoDownloadPhotos =
+          remoteStorage['auto_download_photos'] as bool? ?? photos;
+      _autoDownloadVideos =
+          remoteStorage['auto_download_videos'] as bool? ?? videos;
+      _autoDownloadStickers =
+          remoteStorage['auto_download_stickers'] as bool? ?? stickers;
+      _autoDownloadVoiceNotes =
+          remoteStorage['auto_download_voice'] as bool? ?? voice;
+      _messageSounds = widget.appearance.messageSoundsEnabled;
+      _callSounds = widget.appearance.callSoundsEnabled;
+      _largeText = widget.appearance.largeText;
+      _reducedMotion = widget.appearance.reducedMotion;
+      _highContrast = widget.appearance.highContrast;
+      _appLock = widget.appearance.appLockEnabled;
+      _chatLock = widget.appearance.chatLockEnabled;
+      _messageTone = widget.appearance.messageTone;
+      _callTone = widget.appearance.callTone;
+      _lastSeen =
+          remotePreferences?['last_seen_visibility'] as String? ??
+          prefs.getString('airtext.privacy.last-seen') ??
+          'Everyone';
+      _profilePicture =
+          remotePreferences?['profile_picture_visibility'] as String? ??
+          prefs.getString('airtext.privacy.profile-picture') ??
+          'My contacts';
+      _about =
+          remotePreferences?['about_visibility'] as String? ??
+          prefs.getString('airtext.privacy.about') ??
+          'My contacts';
+      _links =
+          remotePreferences?['links_visibility'] as String? ??
+          prefs.getString('airtext.privacy.links') ??
+          'My contacts';
+      _status =
+          remotePreferences?['status_visibility'] as String? ??
+          prefs.getString('airtext.privacy.status') ??
+          'Everyone';
+      _defaultMessageTimer =
+          remotePreferences?['disappearing_messages'] as bool? ??
+          prefs.getBool(AirTextAppearance.disappearingMessagesKey) ??
+          false;
+    });
+  }
+
+  Future<void> _loadCacheSize() async {
+    final size = await CacheManagerService.getCacheSize();
+    if (!mounted) return;
+    setState(() => _cacheSize = size);
+  }
+
+  Future<void> _persistSmsFallback(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('sms_fallback_enabled', value);
+    if (!mounted) return;
+    setState(() => _offlineMessaging = value);
+    await _persistMessagingSettings();
+  }
+
+  Future<void> _persistMessagingSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('sms_delivery_receipts', _deliveryReceipts);
+    await prefs.setString('sms_payload_prefix', _defaultPayloadPrefix);
+    if (!widget.api.isAuthenticated) return;
+    try {
+      await widget.api.updateSmsGatewayPreferences(
+        messagingSettings: {
+          'default_payload_prefix': _defaultPayloadPrefix,
+          'delivery_receipts': _deliveryReceipts,
+          'sms_fallback_enabled': _offlineMessaging,
+        },
+      );
+    } on AirTextApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved on this phone only: ${error.message}')),
+        );
+      }
+    }
+  }
+
+  Future<void> _persistStorageSettings() async {
+    await StorageSettingsService.saveSettings(
+      useLessDataForCalls: _useLessDataForCalls,
+      uploadQuality: _uploadQuality,
+      autoDownloadQuality: _autoDownloadQuality,
+      mobileDataDownloads: _mobileDataDownloads,
+      wifiDownloads: _wifiDownloads,
+      roamingDownloads: _roamingDownloads,
+      autoDownloadPhotos: _autoDownloadPhotos,
+      autoDownloadVideos: _autoDownloadVideos,
+      autoDownloadStickers: _autoDownloadStickers,
+      autoDownloadVoice: _autoDownloadVoiceNotes,
+    );
+    if (!widget.api.isAuthenticated) return;
+    try {
+      await widget.api.updateSmsGatewayPreferences(
+        storageSettings: {
+          'use_less_data_for_calls': _useLessDataForCalls,
+          'upload_quality': _uploadQuality,
+          'auto_download_quality': _autoDownloadQuality,
+          'mobile_data_downloads': _mobileDataDownloads,
+          'wifi_downloads': _wifiDownloads,
+          'roaming_downloads': _roamingDownloads,
+          'auto_download_photos': _autoDownloadPhotos,
+          'auto_download_videos': _autoDownloadVideos,
+          'auto_download_stickers': _autoDownloadStickers,
+          'auto_download_voice': _autoDownloadVoiceNotes,
+        },
+      );
+    } on AirTextApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved on this phone only: ${error.message}')),
+        );
+      }
+    }
+  }
+
+  Future<void> _setStorageOption(String setting, String value) async {
+    setState(() {
+      switch (setting) {
+        case 'upload_quality':
+          _uploadQuality = value;
+        case 'auto_download_quality':
+          _autoDownloadQuality = value;
+        case 'mobile_data_downloads':
+          _mobileDataDownloads = value;
+        case 'wifi_downloads':
+          _wifiDownloads = value;
+        case 'roaming_downloads':
+          _roamingDownloads = value;
+      }
+    });
+    await _persistStorageSettings();
+  }
+
+  Future<void> _setDefaultPayloadPrefix(String value) async {
+    setState(() => _defaultPayloadPrefix = value);
+    await _persistMessagingSettings();
+  }
+
+  Future<void> _setDeliveryReceipts(bool value) async {
+    setState(() => _deliveryReceipts = value);
+    await _persistMessagingSettings();
+  }
+
+  Future<void> _setLessDataForCalls(bool value) async {
+    setState(() => _useLessDataForCalls = value);
+    await _persistStorageSettings();
+  }
+
+  Future<void> _loadGatewayConfiguration() async {
+    if (!widget.api.isAuthenticated) return;
+    try {
+      final gateway = await widget.api.getSmsGateway();
+      if (!mounted) return;
+      setState(() {
+        _gatewayConfigured = gateway['configured'] as bool? ?? false;
+        _gatewaySender = gateway['sender_number'] as String?;
+        _gatewayStatus = _gatewayConfigured ? 'Ready' : 'Not configured';
+      });
+    } on AirTextApiException catch (error) {
+      if (mounted) setState(() => _gatewayStatus = error.message);
+    }
+  }
+
+  Future<void> _loadStorageSummary() async {
+    if (!widget.api.isAuthenticated) return;
+    try {
+      final summary = await widget.api.getStorageSummary();
+      if (mounted) setState(() => _storageSummary = summary);
+    } on AirTextApiException {
+      // The device cache controls remain available if account storage is offline.
+    }
+  }
+
+  Future<void> _testSmsGateway() async {
+    if (!widget.api.isAuthenticated || _testingGateway) return;
+    setState(() {
+      _testingGateway = true;
+      _gatewayStatus = 'Checking connection...';
+    });
+    try {
+      final message = await widget.api.testSmsGateway();
+      if (mounted) setState(() => _gatewayStatus = message);
+    } on AirTextApiException catch (error) {
+      if (mounted) setState(() => _gatewayStatus = error.message);
+    } finally {
+      if (mounted) setState(() => _testingGateway = false);
+    }
+  }
+
+  Future<void> _persistPhotoDownload(bool value) async {
+    await StorageSettingsService.setPhotosDownload(value);
+    if (!mounted) return;
+    setState(() => _autoDownloadPhotos = value);
+    await _persistStorageSettings();
+  }
+
+  Future<void> _persistVideoDownload(bool value) async {
+    await StorageSettingsService.setVideosDownload(value);
+    if (!mounted) return;
+    setState(() => _autoDownloadVideos = value);
+    await _persistStorageSettings();
+  }
+
+  Future<void> _persistStickerDownload(bool value) async {
+    await StorageSettingsService.setStickersDownload(value);
+    if (!mounted) return;
+    setState(() => _autoDownloadStickers = value);
+    await _persistStorageSettings();
+  }
+
+  Future<void> _persistVoiceDownload(bool value) async {
+    await StorageSettingsService.setVoiceNotesDownload(value);
+    if (!mounted) return;
+    setState(() => _autoDownloadVoiceNotes = value);
+    await _persistStorageSettings();
+  }
+
+  Future<void> _loadSavedLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _appLanguage =
+          prefs.getString('airtext.language') ?? 'Kiswahili (Tanzania)';
+    });
+  }
+
+  Future<void> _saveLanguage(String language) async {
+    await widget.appearance.setLanguage(language);
+    if (widget.api.isAuthenticated) {
+      try {
+        await widget.api.updateUserPreferences(appLanguage: language);
+      } catch (_) {
+        // The server sync is best-effort for app language until the backend is reachable.
+      }
+    }
+    if (!mounted) return;
+    setState(() => _appLanguage = language);
+  }
+
+  Future<void> _syncPrivacySettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('airtext.privacy.last-seen', _lastSeen);
+    await prefs.setString('airtext.privacy.profile-picture', _profilePicture);
+    await prefs.setString('airtext.privacy.about', _about);
+    await prefs.setString('airtext.privacy.links', _links);
+    await prefs.setString('airtext.privacy.status', _status);
+    await prefs.setBool(
+      AirTextAppearance.disappearingMessagesKey,
+      _defaultMessageTimer,
+    );
+    if (!widget.api.isAuthenticated) return;
+    try {
+      await widget.api.updateUserPreferences(
+        lastSeenVisibility: _lastSeen,
+        profilePictureVisibility: _profilePicture,
+        aboutVisibility: _about,
+        linksVisibility: _links,
+        statusVisibility: _status,
+        disappearingMessages: _defaultMessageTimer,
+      );
+    } catch (_) {
+      // Keep the local UI state even if the remote sync is temporarily unavailable.
+    }
+  }
+
+  Future<void> _setBiometricLock(String key, bool value) async {
+    final authenticated = await AppLockService.authenticateUser();
+    if (!mounted) return;
+    if (!authenticated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Biometric authentication was not completed.'),
+        ),
+      );
+      return;
+    }
+
+    await widget.appearance.setBooleanPreference(key, value);
+    if (!mounted) return;
+    setState(() {
+      if (key == AirTextAppearance.appLockKey) _appLock = value;
+      if (key == AirTextAppearance.chatLockKey) _chatLock = value;
+    });
+  }
+
+  Future<void> _setAccessibilityPreference(String key, bool value) async {
+    await widget.appearance.setBooleanPreference(key, value);
+    if (!mounted) return;
+    setState(() {
+      if (key == AirTextAppearance.largeTextKey) _largeText = value;
+      if (key == AirTextAppearance.reducedMotionKey) _reducedMotion = value;
+      if (key == AirTextAppearance.highContrastKey) _highContrast = value;
+    });
+  }
+
+  Future<void> _chooseMessageTone(String value) async {
+    await widget.appearance.setMessageTone(value);
+    if (!mounted) return;
+    setState(() => _messageTone = value);
+    final platform = switch (defaultTargetPlatform) {
+      TargetPlatform.android => 'android',
+      TargetPlatform.iOS => 'ios',
+      _ => null,
+    };
+    if (platform != null && widget.api.isAuthenticated) {
+      try {
+        final token = await FirebaseMessaging.instance.getToken();
+        if (token != null) {
+          await widget.api.registerPushToken(
+            token,
+            platform,
+            messageTone: value,
+          );
+        }
+      } on Exception {
+        // Push tone sync is optional until Firebase is configured.
+      }
+    }
+    await NotificationSoundService.playMessageSound(preview: true);
+  }
+
+  Future<void> _chooseCallTone(String value) async {
+    await widget.appearance.setCallTone(value);
+    if (!mounted) return;
+    setState(() => _callTone = value);
+    await NotificationSoundService.startCallSound();
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    await NotificationSoundService.stopCallSound();
+  }
 
   @override
   Widget build(BuildContext context) {
     final section = widget.section;
+    final storage = _storageSummary?['storage'] as Map<String, dynamic>?;
+    final networkUsage =
+      _storageSummary?['network_usage'] as Map<String, dynamic>?;
+    final networkBytes =
+      (networkUsage?['uploaded_bytes'] as int? ?? 0) +
+      (networkUsage?['downloaded_bytes'] as int? ?? 0);
+    final accountUsage = storage == null || networkUsage == null
+      ? 'Sign in to view account usage'
+      : '${storage['message_count']} messages · ${_formatDataSize(networkBytes)} used this month';
     return Scaffold(
+      backgroundColor: const Color(0xFFF7F3ED),
       appBar: AppBar(
+        backgroundColor: const Color(0xFFF7F3ED),
+        surfaceTintColor: Colors.transparent,
         leading: const BackButton(),
-        title: Text(section),
+        title: Text(_appCopy(context, section)),
         titleTextStyle: const TextStyle(
           color: _ink,
           fontSize: 17,
@@ -6018,24 +9503,76 @@ class _SettingsDetailPageState extends State<_SettingsDetailPage> {
               ],
             ),
           ] else if (section == 'GSM & SMS Protocol') ...[
-            const _ListSectionLabel('OFFLINE MESSAGING'),
+            const _ListSectionLabel('CHATS & PAYLOAD PREFERENCES'),
             _GroupedList(
               children: [
                 SwitchListTile.adaptive(
                   activeThumbColor: _green,
-                  title: const Text('SMS fallback'),
+                  title: const Text('Send through phone SIM'),
                   subtitle: const Text(
-                    'Send messages over GSM when data is unavailable',
+                    'Send regular SMS from this device; recipients do not need AirText',
                   ),
                   value: _offlineMessaging,
-                  onChanged: (value) =>
-                      setState(() => _offlineMessaging = value),
+                  onChanged: _persistSmsFallback,
                 ),
                 const _GroupDivider(),
-                const ListTile(
-                  title: Text('Payload protocol'),
-                  subtitle: Text('Air app protocol v1.0'),
+                ListTile(
+                  title: const Text('Default payload prefix'),
+                  subtitle: Text(_defaultPayloadPrefix),
                   trailing: Icon(Icons.chevron_right),
+                  onTap: () => _showOptionSheet(
+                    'Default payload prefix',
+                    const ['MSG:', 'STAT:', 'ACK:'],
+                    (value) => unawaited(_setDefaultPayloadPrefix(value)),
+                    _defaultPayloadPrefix,
+                  ),
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Delivery receipts'),
+                  subtitle: const Text('Keep delivery events in chat history'),
+                  value: _deliveryReceipts,
+                  onChanged: _setDeliveryReceipts,
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            const _ListSectionLabel('SMS GATEWAY & TRANSPORT'),
+            _GroupedList(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.settings_input_antenna),
+                  title: const Text('Transport driver'),
+                  subtitle: Text(
+                    _gatewayConfigured
+                        ? 'Twilio · ${_gatewaySender ?? 'Sender configured'}'
+                        : 'Twilio · ${widget.api.isAuthenticated ? _gatewayStatus : 'Sign in to check server configuration'}',
+                  ),
+                  trailing: const Icon(Icons.lock_outline),
+                ),
+                const _GroupDivider(),
+                ListTile(
+                  title: const Text('Connection status'),
+                  subtitle: Text(_gatewayStatus),
+                  trailing: _testingGateway
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.chevron_right),
+                  onTap: widget.api.isAuthenticated ? _testSmsGateway : null,
+                ),
+                const _GroupDivider(),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: FilledButton.icon(
+                    onPressed: widget.api.isAuthenticated && !_testingGateway
+                        ? _testSmsGateway
+                        : null,
+                    icon: const Icon(Icons.network_check),
+                    label: const Text('Test gateway connection'),
+                  ),
                 ),
               ],
             ),
@@ -6046,15 +9583,505 @@ class _SettingsDetailPageState extends State<_SettingsDetailPage> {
                 SwitchListTile.adaptive(
                   activeThumbColor: _green,
                   title: const Text('Message sounds'),
+                  subtitle: Text('Incoming messages · $_messageTone'),
                   value: _messageSounds,
-                  onChanged: (value) => setState(() => _messageSounds = value),
+                  onChanged: (value) async {
+                    await widget.appearance.setMessageSoundsEnabled(value);
+                    if (mounted) setState(() => _messageSounds = value);
+                  },
                 ),
+                if (_messageSounds)
+                  ListTile(
+                    title: const Text('Message tone'),
+                    subtitle: Text(_messageTone),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _showOptionSheet(
+                      'Message tone',
+                      NotificationSoundService.messageTones.keys.toList(),
+                      (value) => unawaited(_chooseMessageTone(value)),
+                      _messageTone,
+                    ),
+                  ),
                 const _GroupDivider(),
                 SwitchListTile.adaptive(
                   activeThumbColor: _green,
                   title: const Text('Call sounds'),
+                  subtitle: Text('Incoming calls · $_callTone'),
                   value: _callSounds,
-                  onChanged: (value) => setState(() => _callSounds = value),
+                  onChanged: (value) async {
+                    await widget.appearance.setCallSoundsEnabled(value);
+                    if (mounted) setState(() => _callSounds = value);
+                  },
+                ),
+                if (_callSounds)
+                  ListTile(
+                    title: const Text('Call ringtone'),
+                    subtitle: Text(_callTone),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _showOptionSheet(
+                      'Call ringtone',
+                      NotificationSoundService.messageTones.keys.toList(),
+                      (value) => unawaited(_chooseCallTone(value)),
+                      _callTone,
+                    ),
+                  ),
+              ],
+            ),
+          ] else if (section == 'Storage and data') ...[
+            const _ListSectionLabel('MEDIA DISPLAY'),
+            _GroupedList(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.phone_android),
+                  title: Text(_deviceName),
+                  subtitle: Text('$_deviceSystem · detected on this device'),
+                  trailing: IconButton(
+                    tooltip: 'Refresh device details',
+                    onPressed: _loadDeviceInfo,
+                    icon: const Icon(Icons.refresh),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            const _ListSectionLabel('DATA USAGE'),
+            _GroupedList(
+              children: [
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Use less data for calls'),
+                  value: _useLessDataForCalls,
+                  onChanged: _setLessDataForCalls,
+                ),
+                const _GroupDivider(),
+                ListTile(
+                  title: const Text('Network usage & cache'),
+                  subtitle: Text('Device cache: $_cacheSize · $accountUsage'),
+                  onTap: _loadStorageSummary,
+                  trailing: TextButton(
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.maybeOf(context);
+                      await CacheManagerService.clearCache();
+                      await _loadCacheSize();
+                      if (messenger != null && mounted) {
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Cache has been cleared successfully.',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    child: const Text('Clear cache'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            const _ListSectionLabel('MEDIA QUALITY'),
+            _GroupedList(
+              children: [
+                ListTile(
+                  title: const Text('Upload quality'),
+                  subtitle: Text(_uploadQuality == 'hd' ? 'HD' : 'Standard'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showOptionSheet(
+                    'Upload quality',
+                    const ['Standard', 'HD'],
+                    (value) => unawaited(
+                      _setStorageOption('upload_quality', value.toLowerCase()),
+                    ),
+                    _uploadQuality == 'hd' ? 'HD' : 'Standard',
+                  ),
+                ),
+                const _GroupDivider(),
+                ListTile(
+                  title: const Text('Auto-download quality'),
+                  subtitle: Text(
+                    _autoDownloadQuality == 'high' ? 'High' : 'Auto',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showOptionSheet(
+                    'Auto-download quality',
+                    const ['Auto', 'High'],
+                    (value) => unawaited(
+                      _setStorageOption(
+                        'auto_download_quality',
+                        value.toLowerCase(),
+                      ),
+                    ),
+                    _autoDownloadQuality == 'high' ? 'High' : 'Auto',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            const _ListSectionLabel('AUTO-DOWNLOAD'),
+            _GroupedList(
+              children: [
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Photos'),
+                  value: _autoDownloadPhotos,
+                  onChanged: _persistPhotoDownload,
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Videos'),
+                  value: _autoDownloadVideos,
+                  onChanged: _persistVideoDownload,
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Stickers'),
+                  value: _autoDownloadStickers,
+                  onChanged: _persistStickerDownload,
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Voice notes'),
+                  value: _autoDownloadVoiceNotes,
+                  onChanged: _persistVoiceDownload,
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            const _ListSectionLabel('DOWNLOAD OVER'),
+            _GroupedList(
+              children: [
+                for (final setting in const [
+                  ('mobile_data_downloads', 'Mobile data'),
+                  ('wifi_downloads', 'Wi-Fi'),
+                  ('roaming_downloads', 'Roaming'),
+                ]) ...[
+                  if (setting.$1 != 'mobile_data_downloads')
+                    const _GroupDivider(),
+                  ListTile(
+                    title: Text(setting.$2),
+                    subtitle: Text(
+                      _downloadLabel(switch (setting.$1) {
+                        'mobile_data_downloads' => _mobileDataDownloads,
+                        'wifi_downloads' => _wifiDownloads,
+                        _ => _roamingDownloads,
+                      }),
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _showOptionSheet(
+                      '${setting.$2} downloads',
+                      const ['None', 'Photos', 'All media'],
+                      (value) => unawaited(
+                        _setStorageOption(
+                          setting.$1,
+                          switch (value) {
+                            'None' => 'none',
+                            'Photos' => 'photos',
+                            _ => 'all',
+                          },
+                        ),
+                      ),
+                      _downloadLabel(switch (setting.$1) {
+                        'mobile_data_downloads' => _mobileDataDownloads,
+                        'wifi_downloads' => _wifiDownloads,
+                        _ => _roamingDownloads,
+                      }),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ] else if (section == 'Accessibility') ...[
+            const _ListSectionLabel('DISPLAY ACCESS'),
+            _GroupedList(
+              children: [
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Large text'),
+                  value: _largeText,
+                  onChanged: (value) => _setAccessibilityPreference(
+                    AirTextAppearance.largeTextKey,
+                    value,
+                  ),
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Reduced motion'),
+                  value: _reducedMotion,
+                  onChanged: (value) => _setAccessibilityPreference(
+                    AirTextAppearance.reducedMotionKey,
+                    value,
+                  ),
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('High contrast'),
+                  value: _highContrast,
+                  onChanged: (value) => _setAccessibilityPreference(
+                    AirTextAppearance.highContrastKey,
+                    value,
+                  ),
+                ),
+                const _GroupDivider(),
+                const ListTile(
+                  leading: Icon(Icons.record_voice_over_outlined),
+                  title: Text('Screen reader support'),
+                  subtitle: Text(
+                    'TalkBack and VoiceOver are controlled in device settings. Air app exposes native Flutter semantics.',
+                  ),
+                ),
+              ],
+            ),
+          ] else if (section == 'App language') ...[
+            _ListSectionLabel(_appCopy(context, 'LANGUAGE')),
+            _GroupedList(
+              children: [
+                ListTile(
+                  leading: const Icon(CupertinoIcons.globe),
+                  title: Text(_appLanguage),
+                  subtitle: Text(
+                    _appCopy(context, 'Tap to change app language'),
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    final selected = await Navigator.of(context).push<String>(
+                      CupertinoPageRoute<String>(
+                        builder: (_) => LanguageSelectorScreen(api: widget.api),
+                      ),
+                    );
+                    if (selected != null && selected.isNotEmpty) {
+                      await _saveLanguage(selected);
+                    }
+                  },
+                ),
+              ],
+            ),
+          ] else if (section == 'Invite friend') ...[
+            const _ListSectionLabel('SHARE'),
+            _GroupedList(
+              children: [
+                ListTile(
+                  leading: const Icon(CupertinoIcons.person_badge_plus),
+                  title: const Text('Invite via link'),
+                  subtitle: const Text('Share an invite code with a friend'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showShareInviteDialog(),
+                ),
+              ],
+            ),
+          ] else if (section == 'Privacy') ...[
+            const _ListSectionLabel('WHO CAN SEE'),
+            _GroupedList(
+              children: [
+                _PrivacyRow(
+                  title: 'Last seen and online',
+                  value: _lastSeen,
+                  options: const ['Everyone', 'My contacts', 'Nobody'],
+                  onTap: () => _showOptionSheet(
+                    'Last seen and online',
+                    const ['Everyone', 'My contacts', 'Nobody'],
+                    (value) {
+                      setState(() => _lastSeen = value);
+                      unawaited(_syncPrivacySettings());
+                    },
+                    _lastSeen,
+                  ),
+                ),
+                const _GroupDivider(),
+                _PrivacyRow(
+                  title: 'Profile picture',
+                  value: _profilePicture,
+                  options: const ['Everyone', 'My contacts', 'Nobody'],
+                  onTap: () => _showOptionSheet(
+                    'Profile picture',
+                    const ['Everyone', 'My contacts', 'Nobody'],
+                    (value) {
+                      setState(() => _profilePicture = value);
+                      unawaited(_syncPrivacySettings());
+                    },
+                    _profilePicture,
+                  ),
+                ),
+                const _GroupDivider(),
+                _PrivacyRow(
+                  title: 'About',
+                  value: _about,
+                  options: const ['Everyone', 'My contacts', 'Nobody'],
+                  onTap: () => _showOptionSheet(
+                    'About',
+                    const ['Everyone', 'My contacts', 'Nobody'],
+                    (value) {
+                      setState(() => _about = value);
+                      unawaited(_syncPrivacySettings());
+                    },
+                    _about,
+                  ),
+                ),
+                const _GroupDivider(),
+                _PrivacyRow(
+                  title: 'Links',
+                  value: _links,
+                  options: const ['Everyone', 'My contacts', 'Nobody'],
+                  onTap: () => _showOptionSheet(
+                    'Links',
+                    const ['Everyone', 'My contacts', 'Nobody'],
+                    (value) {
+                      setState(() => _links = value);
+                      unawaited(_syncPrivacySettings());
+                    },
+                    _links,
+                  ),
+                ),
+                const _GroupDivider(),
+                _PrivacyRow(
+                  title: 'Status',
+                  value: _status,
+                  options: const ['Everyone', 'My contacts', 'Nobody'],
+                  onTap: () => _showOptionSheet(
+                    'Status',
+                    const ['Everyone', 'My contacts', 'Nobody'],
+                    (value) {
+                      setState(() => _status = value);
+                      unawaited(_syncPrivacySettings());
+                    },
+                    _status,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            const _ListSectionLabel('SECURITY TOOLS'),
+            _GroupedList(
+              children: [
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Default message timer'),
+                  subtitle: const Text('Auto-delete messages by default'),
+                  value: _defaultMessageTimer,
+                  onChanged: (value) async {
+                    setState(() => _defaultMessageTimer = value);
+                    await widget.appearance.setBooleanPreference(
+                      AirTextAppearance.disappearingMessagesKey,
+                      value,
+                    );
+                    await _syncPrivacySettings();
+                  },
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Groups'),
+                  value: _groups,
+                  onChanged: (value) => setState(() => _groups = value),
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Live location'),
+                  value: _liveLocation,
+                  onChanged: (value) => setState(() => _liveLocation = value),
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Contacts block'),
+                  value: _contactBlock,
+                  onChanged: (value) => setState(() => _contactBlock = value),
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('App lock'),
+                  value: _appLock,
+                  onChanged: (value) =>
+                      _setBiometricLock(AirTextAppearance.appLockKey, value),
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Chat lock'),
+                  value: _chatLock,
+                  onChanged: (value) =>
+                      _setBiometricLock(AirTextAppearance.chatLockKey, value),
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Allow camera effects'),
+                  value: _allowCameraEffects,
+                  onChanged: (value) =>
+                      setState(() => _allowCameraEffects = value),
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Advanced'),
+                  value: _advanced,
+                  onChanged: (value) => setState(() => _advanced = value),
+                ),
+                const _GroupDivider(),
+                SwitchListTile.adaptive(
+                  activeThumbColor: _green,
+                  title: const Text('Privacy checkup'),
+                  value: _privacyCheckup,
+                  onChanged: (value) => setState(() => _privacyCheckup = value),
+                ),
+              ],
+            ),
+          ] else if (section == 'Help & feedback') ...[
+            const _ListSectionLabel('SUPPORT'),
+            _GroupedList(
+              children: [
+                ListTile(
+                  leading: const Icon(CupertinoIcons.chat_bubble_text_fill),
+                  title: const Text('Send feedback'),
+                  subtitle: const Text('Tell us what to improve'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showFeedbackDialog(),
+                ),
+                const _GroupDivider(),
+                ListTile(
+                  leading: const Icon(CupertinoIcons.doc_text),
+                  title: const Text('Terms and privacy policy'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showGenericInfo(
+                    'Terms & privacy policy',
+                    'This section will open the app policy document.',
+                  ),
+                ),
+                const _GroupDivider(),
+                ListTile(
+                  leading: const Icon(CupertinoIcons.flag_fill),
+                  title: const Text('Channel reports'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showGenericInfo(
+                    'Channel reports',
+                    'Submit channel abuse reports here.',
+                  ),
+                ),
+                const _GroupDivider(),
+                ListTile(
+                  leading: const Icon(CupertinoIcons.info_circle_fill),
+                  title: const Text('App info'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showGenericInfo(
+                    'App info',
+                    'AirText v1.0 · Offline-first communication platform.',
+                  ),
+                ),
+                const _GroupDivider(),
+                ListTile(
+                  leading: const Icon(
+                    CupertinoIcons.person_crop_circle_badge_exclam,
+                  ),
+                  title: const Text('Contact report'),
+                  subtitle: const Text('Report or block a contact'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showReportDialog(),
                 ),
               ],
             ),
@@ -6078,6 +10105,375 @@ class _SettingsDetailPageState extends State<_SettingsDetailPage> {
       ),
     );
   }
+
+  Future<void> _showShareInviteDialog() async {
+    await showCupertinoDialog<void>(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('Invite friend'),
+        content: const Text(
+          'Share your AirText invite link or copy the code to send to a friend.',
+        ),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: () {
+              Clipboard.setData(
+                const ClipboardData(text: 'https://airtext.app/invite/airtext'),
+              );
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Invite link copied.')),
+              );
+            },
+            child: const Text('Copy link'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showFeedbackDialog() async {
+    await showCupertinoDialog<void>(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('Send feedback'),
+        content: const Text(
+          'We value your feedback. Share any bugs, ideas, or suggestions to improve AirText.',
+        ),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Feedback draft saved.')),
+              );
+            },
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showReportDialog() async {
+    await showCupertinoDialog<void>(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('Contact report'),
+        content: const Text(
+          'Report this contact for abuse or spam. You can also block them from further interacting with you.',
+        ),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Contact reported and blocked.')),
+              );
+            },
+            child: const Text('Report & block'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showOptionSheet(
+    String title,
+    List<String> options,
+    ValueChanged<String> onSelect,
+    String currentValue,
+  ) async {
+    final selected = await showCupertinoModalPopup<String>(
+      context: context,
+      builder: (context) => CupertinoActionSheet(
+        title: Text(title),
+        actions: [
+          for (final option in options)
+            CupertinoActionSheetAction(
+              onPressed: () => Navigator.pop(context, option),
+              isDefaultAction: option == currentValue,
+              child: Text(option),
+            ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ),
+    );
+    if (selected != null) onSelect(selected);
+  }
+
+  String _downloadLabel(String value) => switch (value) {
+    'none' => 'None',
+    'photos' => 'Photos',
+    'all' => 'All media',
+    _ => 'Auto',
+  };
+
+  String _formatDataSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  Future<void> _showGenericInfo(String title, String message) async {
+    await showCupertinoDialog<void>(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PrivacyRow extends StatelessWidget {
+  const _PrivacyRow({
+    required this.title,
+    required this.value,
+    required this.options,
+    required this.onTap,
+  });
+
+  final String title;
+  final String value;
+  final List<String> options;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      title: Text(title),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(value, style: const TextStyle(color: _green, fontSize: 13)),
+          const SizedBox(width: 6),
+          const Icon(Icons.chevron_right, color: _lightMuted, size: 18),
+        ],
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+class LanguageSelectorScreen extends StatefulWidget {
+  const LanguageSelectorScreen({super.key, required this.api});
+
+  final AirTextApi api;
+
+  @override
+  State<LanguageSelectorScreen> createState() => _LanguageSelectorScreenState();
+}
+
+class _LanguageSelectorScreenState extends State<LanguageSelectorScreen> {
+  static const List<String> _allLanguages = [
+    'Kiswahili (Tanzania)',
+    'English',
+    'French (Français)',
+    'Spanish (Español)',
+    'Arabic (العربية)',
+    'Mandarin Chinese (中文)',
+    'Portuguese (Português)',
+    'Hindi (हिन्दी)',
+    'Russian (Русский)',
+    'German (Deutsch)',
+    'Japanese (日本語)',
+    'Korean (한국어)',
+    'Italian (Italiano)',
+    'Turkish (Türkçe)',
+    'Vietnamese (Tiếng Việt)',
+    'Urdu (اردو)',
+    'Persian (فارسی)',
+    'Polish (Polski)',
+    'Ukrainian (Українська)',
+    'Dutch (Nederlands)',
+    'Greek (Ελληνικά)',
+    'Bengali (বাংলা)',
+    'Punjabi (ਪੰਜਾਬੀ)',
+    'Javanese (Basa Jawa)',
+    'Telugu (తెలుగు)',
+    'Marathi (मराठी)',
+    'Tamil (தமிழ்)',
+    'Gujarati (ગુજરાતી)',
+    'Hausa (Harshen Hausa)',
+    'Yoruba (Yorùbá)',
+    'Igbo (Asụsụ Igbo)',
+    'Amharic (አማርኛ)',
+    'Zulu (isiZulu)',
+    'Xhosa (isiXhosa)',
+    'Somali (Soomaaliga)',
+    'Malay / Indonesian (Bahasa)',
+    'Tagalog (Filipino)',
+    'Thai (ไทย)',
+    'Hungarian (Magyar)',
+    'Czech (Čeština)',
+    'Swedish (Svenska)',
+    'Danish (Dansk)',
+    'Finnish (Suomi)',
+    'Norwegian (Norsk)',
+    'Romanian (Română)',
+    'Hebrew (עברית)',
+    'Bulgarian (Български)',
+    'Serbian (Српски)',
+    'Croatian (Hrvatski)',
+    'Slovak (Slovenčina)',
+  ];
+
+  late TextEditingController _searchController;
+  List<String> _filteredLanguages = _allLanguages;
+  String _selectedLanguage = 'Kiswahili (Tanzania)';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+    _searchController.addListener(_filterLanguages);
+    unawaited(_loadSavedLanguage());
+  }
+
+  Future<void> _loadSavedLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _selectedLanguage =
+          prefs.getString('airtext.language') ?? 'Kiswahili (Tanzania)';
+      _filteredLanguages = _allLanguages;
+    });
+  }
+
+  void _filterLanguages() {
+    final query = _searchController.text.trim().toLowerCase();
+    setState(() {
+      _filteredLanguages = query.isEmpty
+          ? _allLanguages
+          : _allLanguages
+                .where((language) => language.toLowerCase().contains(query))
+                .toList();
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.removeListener(_filterLanguages);
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final languages = _filteredLanguages;
+    final strings = AppLocalizations.of(context)!;
+    return CupertinoPageScaffold(
+      backgroundColor: const Color(0xFFF9FAFB),
+      navigationBar: CupertinoNavigationBar(
+        backgroundColor: Color(0xFFF9FAFB),
+        middle: Text(
+          strings.selectLanguage,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              CupertinoSearchTextField(
+                controller: _searchController,
+                placeholder: strings.searchLanguage,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+                backgroundColor: CupertinoColors.systemBackground,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: CupertinoColors.systemBackground,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE5E5EA)),
+                  ),
+                  child: ListView.separated(
+                    itemCount: languages.length,
+                    separatorBuilder: (context, index) =>
+                        const Divider(height: 1, color: Color(0xFFF2F2F7)),
+                    itemBuilder: (context, index) {
+                      final language = languages[index];
+                      final isSelected = _selectedLanguage == language;
+                      return CupertinoListTile(
+                        title: Text(
+                          language,
+                          style: TextStyle(
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: isSelected
+                                ? const Color(0xFF007AFF)
+                                : const Color(0xFF1C1C1E),
+                          ),
+                        ),
+                        trailing: isSelected
+                            ? const Icon(
+                                CupertinoIcons.checkmark,
+                                color: Color(0xFF007AFF),
+                              )
+                            : null,
+                        onTap: () async {
+                          final navigator = Navigator.of(context);
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.setString('airtext.language', language);
+                          if (widget.api.isAuthenticated) {
+                            try {
+                              await widget.api.updateUserPreferences(
+                                appLanguage: language,
+                              );
+                            } catch (_) {
+                              // Best-effort server sync so the app remains responsive.
+                            }
+                          }
+                          if (!mounted) return;
+                          setState(() => _selectedLanguage = language);
+                          if (navigator.canPop()) {
+                            navigator.pop(language);
+                          }
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ListSectionLabel extends StatelessWidget {
@@ -6087,12 +10483,13 @@ class _ListSectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       child: Text(
         label,
-        style: const TextStyle(
-          color: Color(0xFF75827D),
+        style: TextStyle(
+          color: isDark ? _silver : _lightMuted,
           fontSize: 11,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.7,
@@ -6109,9 +10506,10 @@ class _GroupedList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
+      color: isDark ? _panel : _lightPanel,
+      borderRadius: BorderRadius.circular(10),
       child: Column(mainAxisSize: MainAxisSize.min, children: children),
     );
   }
@@ -6122,11 +10520,12 @@ class _GroupDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Divider(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Divider(
       height: 1,
       indent: 64,
       endIndent: 14,
-      color: Color(0xFFE8ECE7),
+      color: isDark ? _line : _lightBorder,
     );
   }
 }

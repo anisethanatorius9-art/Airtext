@@ -4,15 +4,14 @@
         <div class="rail-top">
             <flux:button wire:click="showPanel('chats')" variant="ghost" icon="chat-bubble-left-right" square aria-label="Chats" />
             <flux:button wire:click="showPanel('calls')" variant="ghost" icon="phone" square aria-label="Calls" />
-            <flux:button wire:click="showPanel('status')" variant="ghost" icon="globe-alt" square aria-label="Status updates" />
-            <flux:button wire:click="showPanel('channels')" variant="ghost" icon="megaphone" square aria-label="Channels" />
+            <flux:button wire:click="showPanel('status')" variant="ghost" icon="globe-alt" square aria-label="Updates" />
             <flux:button wire:click="showPanel('contacts')" variant="ghost" icon="users" square aria-label="Contacts" />
             <flux:button variant="ghost" icon="user-group" square aria-label="Communities and groups" />
         </div>
         <div class="rail-separator" aria-hidden="true"></div>
         <div class="rail-services">
             <flux:button wire:click="showPanel('shop')" variant="ghost" icon="building-storefront" square aria-label="AirText Shop and SMS services" />
-            <flux:button variant="ghost" icon="bell-alert" square aria-label="AirText announcements" />
+            <flux:button wire:click="showPanel('notifications')" variant="ghost" icon="bell-alert" square aria-label="AirText announcements" />
         </div>
         <div class="rail-spacer"></div>
         <div class="rail-media">
@@ -51,6 +50,23 @@
             <section class="favorites-section" aria-labelledby="favorites-heading">
                 <h2 id="favorites-heading" class="calls-section-label">Favorites</h2>
                 <button type="button" wire:click="openFavoritePicker" class="favorite-action"><span class="favorite-action-icon"><flux:icon.user-plus variant="outline" /></span><span>Add favorite</span></button>
+                @if($favorites)
+                <div class="favorite-list" aria-label="Favorite contacts">
+                    @foreach($favorites as $favorite)
+                    @php($initials = collect(explode(' ', trim($favorite['name'])))->map(fn ($part) => strtoupper(substr($part, 0, 1)))->take(2)->join('') ?: '★')
+                    <div class="favorite-person">
+                        <flux:avatar initials="{{ $initials }}" color="zinc" size="sm" />
+                        <span>
+                            <strong>{{ $favorite['name'] }}</strong>
+                            <small>{{ $favorite['number'] }}</small>
+                        </span>
+                        <button type="button" wire:click="removeFavorite('{{ $favorite['number'] }}')" class="remove-favorite" aria-label="Remove {{ $favorite['name'] }} from favorites">
+                            <flux:icon.x-mark variant="outline" />
+                        </button>
+                    </div>
+                    @endforeach
+                </div>
+                @endif
             </section>
             <section class="recent-calls-section" aria-labelledby="recent-calls-heading">
                 <h2 id="recent-calls-heading" class="calls-section-label">Recent</h2>
@@ -121,22 +137,54 @@
         </nav>
         @elseif($leftPanel === 'channels')
         <header class="chats-header">
-            <flux:heading size="xl">Channels</flux:heading>
-            <flux:button variant="ghost" icon="plus" square aria-label="Create channel" />
+            <flux:heading size="xl">Updates</flux:heading>
+            <flux:button wire:click="openChannelComposer" variant="ghost" icon="plus" square aria-label="Create channel" />
         </header>
+        <div class="chat-filters" role="tablist" aria-label="Updates">
+            <button wire:click="showPanel('status')" class="chat-filter" role="tab" aria-selected="false">Status</button>
+            <button wire:click="showPanel('channels')" class="chat-filter is-active" role="tab" aria-selected="true">Channels</button>
+        </div>
         <div class="panel-search">
             <flux:input wire:model.live="search" icon="magnifying-glass" placeholder="Discover channels" />
         </div>
-        <button class="add-contact-row">
+        <button type="button" wire:click="openChannelComposer" class="add-contact-row">
             <flux:icon.megaphone variant="outline" /><span><strong>Create a channel</strong><small>Broadcast updates by SMS</small></span><flux:icon.chevron-right />
         </button>
         <nav class="chat-list" aria-label="Subscribed channels">
-            @foreach($channels as $channel)
-            <button class="chat-list-item">
+            @forelse($this->channelList as $channel)
+            <button type="button" class="chat-list-item">
                 <flux:avatar initials="{{ $channel['initials'] }}" color="zinc" size="md" /><span class="chat-list-copy"><strong>{{ $channel['name'] }}</strong><span>{{ $channel['announcement'] }}</span></span>
             </button>
-            @endforeach
+            @empty
+            <p class="empty-chats">No channels found yet.</p>
+            @endforelse
         </nav>
+        @if($showChannelComposer)
+        <div class="calls-modal-backdrop">
+            <section class="calls-modal" role="dialog" aria-modal="true" aria-labelledby="channel-composer-title">
+                <header class="calls-modal-header">
+                    <flux:heading id="channel-composer-title" size="lg">Create channel</flux:heading>
+                    <flux:button wire:click="closeChannelComposer" variant="ghost" icon="x-mark" square aria-label="Close channel composer" />
+                </header>
+                <form wire:submit="createChannel" class="contact-form">
+                    <flux:field>
+                        <flux:label>Channel name</flux:label>
+                        <flux:input wire:model="channelName" placeholder="AirText Updates" />
+                        @error('channelName')<flux:error>{{ $message }}</flux:error>@enderror
+                    </flux:field>
+                    <flux:field>
+                        <flux:label>Description</flux:label>
+                        <flux:textarea wire:model="channelDescription" placeholder="What should people expect here?" rows="4" />
+                        @error('channelDescription')<flux:error>{{ $message }}</flux:error>@enderror
+                    </flux:field>
+                    <div class="contact-notice-actions">
+                        <flux:button type="button" wire:click="closeChannelComposer" variant="ghost">Cancel</flux:button>
+                        <flux:button type="submit" variant="primary">Create</flux:button>
+                    </div>
+                </form>
+            </section>
+        </div>
+        @endif
         @else
         <header class="chats-header">
             <flux:heading size="xl">Chats</flux:heading>
@@ -291,24 +339,40 @@
             </form>
         </section>
         @endif
-        @if($showWebContactNotice)
-        <div class="contact-notice-backdrop">
-            <section class="contact-notice-modal" role="dialog" aria-modal="true" aria-labelledby="contact-notice-title">
-                <div class="contact-notice-icon"><flux:icon.book-open variant="outline" /></div>
-                <flux:heading id="contact-notice-title" size="lg">Manage contacts from web</flux:heading>
-                <flux:text>On your phone, turn on AirText contacts to start managing contacts from web. Go to AirText &gt; Settings &gt; Privacy &gt; Contacts. Learn more.</flux:text>
-                <div class="contact-notice-actions">
-                    <flux:button wire:click="closeWebContactNotice" variant="ghost">Cancel</flux:button>
-                    <flux:button wire:click="closeWebContactNotice" variant="primary">OK</flux:button>
-                </div>
-            </section>
-        </div>
-        @endif
+
     </aside>
 
     <main class="whatsapp-conversation">
         @if($leftPanel === 'shop')
         @include('livewire.shop-content')
+        @elseif($leftPanel === 'notifications')
+        <section class="notification-center" aria-labelledby="notification-center-heading">
+            <header class="conversation-header">
+                <div>
+                    <flux:heading id="notification-center-heading" size="lg">System notifications</flux:heading>
+                    <flux:text>Service updates and account reminders</flux:text>
+                </div>
+            </header>
+            <div class="notification-center-list">
+                @forelse($this->systemNotifications as $notification)
+                <flux:callout icon="{{ $notification['icon'] }}" variant="secondary" inline>
+                    <flux:callout.heading>{{ $notification['heading'] }}</flux:callout.heading>
+                    <flux:callout.text>{{ $notification['text'] }}</flux:callout.text>
+                    @if($notification['renewable'])
+                    <x-slot name="actions">
+                        <flux:button wire:click="openSubscriptionPlans" variant="primary">Renew now</flux:button>
+                        <flux:button wire:click="openSubscriptionPlans" variant="ghost">View plans</flux:button>
+                    </x-slot>
+                    @endif
+                    <x-slot name="controls">
+                        <flux:button wire:click="dismissSystemNotification('{{ $notification['key'] }}')" variant="ghost" icon="x-mark" square aria-label="Dismiss {{ $notification['heading'] }}" />
+                    </x-slot>
+                </flux:callout>
+                @empty
+                <div class="empty-chats">You're all caught up.</div>
+                @endforelse
+            </div>
+        </section>
         @elseif($leftPanel === 'status')
         @include('livewire.status-viewer')
         @else
@@ -316,11 +380,18 @@
             <flux:button wire:click="backToChats" variant="ghost" icon="arrow-left" square class="conversation-back-button" aria-label="Back to chats" />
             <button type="button" wire:click="openContactProfile" class="conversation-contact" aria-label="Open {{ $this->activeConversation['name'] }} profile">
                 <flux:avatar initials="{{ $this->activeConversation['initials'] }}" color="zinc" size="sm" />
-                <div><strong>{{ $this->activeConversation['name'] }}</strong><span>{{ $this->activeConversation['status'] }}</span></div>
+                <div><strong>{{ $this->activeConversation['name'] }}</strong><span>
+                        @if(($this->activeConversation['typing'] ?? false))
+                        typing... · {{ $this->activeConversation['last_seen'] ?? 'last seen recently' }}
+                        @elseif(($this->activeConversation['is_online'] ?? false))
+                        online
+                        @else
+                        {{ $this->activeConversation['last_seen'] ?? 'last seen recently' }}
+                        @endif
+                    </span></div>
             </button>
             <div class="header-actions">
-                <flux:button variant="ghost" icon="video-camera" square aria-label="Video call" />
-                <flux:button variant="ghost" icon="magnifying-glass" square aria-label="Search conversation" />
+                <flux:button type="button" wire:click="callActiveConversation" variant="ghost" icon="phone" square aria-label="Call contact" />
                 <flux:dropdown position="bottom" align="end">
                     <flux:button variant="ghost" icon="ellipsis-vertical" square aria-label="Conversation menu" />
                     <flux:menu>
@@ -342,11 +413,22 @@
                     @if(!empty($message['code']))
                     <pre class="code-message"><code>{{ $message['body'] }}</code></pre>
                     @elseif(!empty($message['attachment']))
+                    @if(!empty($message['attachment_url']) && ($message['attachment_type'] ?? '') === 'image')
+                    <a class="image-message-attachment" href="{{ $message['attachment_url'] }}" target="_blank" rel="noopener" aria-label="Open image attachment">
+                        <img src="{{ $message['attachment_url'] }}" alt="{{ $message['body'] }}" loading="lazy" />
+                    </a>
+                    @elseif(!empty($message['attachment_url']))
+                    <a class="document-message" href="{{ $message['attachment_url'] }}">
+                        <span class="document-icon"><flux:icon.document-text /></span>
+                        <span><strong>{{ $message['body'] }}</strong><small>Download attachment</small></span>
+                    </a>
+                    @else
                     <div class="document-message"><span class="document-icon">▤</span><span><strong>{{ $message['body'] }}</strong><small>1 DOCX · 24 KB</small></span></div>
+                    @endif
                     @else
                     <p>{{ $message['body'] }}</p>
                     @endif
-                    <small class="message-meta">{{ $message['time'] }} @if($message['mine'])<span class="message-checks">✓✓</span>@endif</small>
+                    <small class="message-meta">{{ $message['time'] }} @if(($message['status'] ?? '') === 'failed')<span class="message-failed">Not sent</span>@elseif($message['mine'])<span class="message-checks {{ ($message['status'] ?? 'sent') === 'read' ? 'is-read' : (($message['status'] ?? 'sent') === 'delivered' ? 'is-delivered' : '') }}">{{ ($message['status'] ?? 'sent') === 'read' ? '✓✓' : '✓' }}</span>@endif</small>
                 </article>
             </div>
             @endforeach
@@ -368,13 +450,33 @@
         </section>
         @endif
 
-        <form wire:submit="sendMessage" class="message-composer">
+        @if($messageAttachment)
+        <div class="attachment-upload-preview">
+            @if(str_starts_with((string) $messageAttachment->getMimeType(), 'image/'))
+            <img src="{{ $messageAttachment->temporaryUrl() }}" alt="Selected image preview" />
+            @else
+            <span class="attachment-upload-icon"><flux:icon.document-text /></span>
+            @endif
+            <span class="attachment-upload-copy"><strong>{{ $messageAttachment->getClientOriginalName() }}</strong><small>{{ $this->formatStorageBytes((int) $messageAttachment->getSize()) }}</small></span>
+            <flux:button type="button" wire:click="clearMessageAttachment" variant="ghost" icon="x-mark" square aria-label="Remove selected attachment" />
+        </div>
+        @endif
+        @error('messageAttachment')<p class="attachment-upload-error" role="alert">{{ $message }}</p>@enderror
+
+        <form wire:submit="sendMessage" class="message-composer" x-data="{ voiceHint: '' }">
             <div class="composer-entry">
                 <flux:button type="button" wire:click="toggleEmojiPicker" variant="ghost" icon="face-smile" square class="emoji-toggle" aria-label="Add emoji" aria-expanded="{{ $showEmojiPicker ? 'true' : 'false' }}" />
                 <flux:input wire:model="messageDraft" class="composer-input" placeholder="{{ $this->activeConversationPreferences['blocked'] ? 'Unblock this contact to reply' : 'Message' }}" aria-label="Type a message" :disabled="$this->activeConversationPreferences['blocked']" />
+                <div class="composer-media-actions">
+                    <flux:button type="button" wire:loading.attr="disabled" wire:target="messageAttachment" x-on:click="$refs.filePicker.click()" variant="ghost" icon="paper-clip" square aria-label="Choose a file" :disabled="$this->activeConversationPreferences['blocked']" />
+                    <flux:button type="button" wire:loading.attr="disabled" wire:target="messageAttachment" x-on:click="$refs.cameraPicker.click()" variant="ghost" icon="camera" square aria-label="Take a photo" :disabled="$this->activeConversationPreferences['blocked']" />
+                </div>
             </div>
-            <flux:button type="button" variant="ghost" icon="paper-clip" square aria-label="Attach file" />
-            <flux:button type="submit" variant="primary" icon="paper-airplane" square aria-label="Send message" :disabled="$this->activeConversationPreferences['blocked']" />
+            <input x-ref="filePicker" class="composer-file-input" type="file" accept="image/*,video/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.zip" wire:model="messageAttachment" />
+            <input x-ref="cameraPicker" class="composer-file-input" type="file" accept="image/*" capture="environment" wire:model="messageAttachment" />
+            <flux:button type="button" class="composer-microphone" variant="primary" icon="microphone" square aria-label="Voice messages are available in the mobile app" title="Voice recording is available in the mobile app" x-on:click="voiceHint = 'Voice recording is available in the mobile app.'" :disabled="$this->activeConversationPreferences['blocked']" />
+            <flux:button type="submit" class="composer-send" variant="primary" icon="paper-airplane" square aria-label="Send message" :disabled="$this->activeConversationPreferences['blocked']" />
+            <span class="sr-only" aria-live="polite" x-text="voiceHint"></span>
         </form>
         @endif
 
@@ -439,24 +541,24 @@
     @include('livewire.status-creator')
 
     @if($showSettings)
-    <section class="settings-drawer" aria-label="AirText settings">
+    <section class="settings-drawer {{ $activeSetting === 'storage' ? 'is-storage-setting' : '' }}" aria-label="AirText settings">
         <header class="settings-drawer-header">
-            <flux:button wire:click="closeSettings" variant="ghost" icon="arrow-left" square aria-label="Back to chats" />
+            <flux:button wire:click="{{ $activeSetting === 'storage' ? 'backFromStorageSettings' : 'closeSettings' }}" variant="ghost" icon="arrow-left" square aria-label="{{ $activeSetting === 'storage' ? (($showStorageDetails || $showNetworkDetails || $showProxyDetails) ? 'Back to storage and data' : 'Back to settings') : 'Back to chats' }}" />
             <div>
-                <flux:heading size="lg">Settings</flux:heading>
-                <flux:text size="sm">AirText workspace preferences</flux:text>
+                <flux:heading size="lg">{{ $activeSetting !== 'storage' ? 'Settings' : ($showStorageDetails ? 'Manage storage' : ($showNetworkDetails ? 'Network usage' : ($showProxyDetails ? 'Proxy' : 'Storage and data'))) }}</flux:heading>
+                @if($activeSetting !== 'storage')<flux:text size="sm">AirText workspace preferences</flux:text>@endif
             </div>
         </header>
 
         <div class="settings-drawer-body">
-            <nav class="settings-navigation" aria-label="Settings sections">
+            <nav class="settings-navigation {{ $activeSetting === 'storage' ? 'is-storage-setting' : '' }}" aria-label="Settings sections">
                 @foreach([
                 'profile' => ['icon' => 'user-circle', 'label' => 'Profile & SMS Identity'],
                 'payload' => ['icon' => 'chat-bubble-left-right', 'label' => 'Chats & Payload Preferences'],
                 'gateway' => ['icon' => 'signal', 'label' => 'SMS Gateway & Transport Configuration'],
                 'notifications' => ['icon' => 'bell', 'label' => 'Notifications & Delivery Alerts'],
                 'privacy' => ['icon' => 'lock-closed', 'label' => 'Privacy & Blocked Contacts'],
-                'storage' => ['icon' => 'circle-stack', 'label' => 'SMS Data, Queue & Storage Management'],
+                'storage' => ['icon' => 'circle-stack', 'label' => 'Storage and data'],
                 ] as $key => $section)
                 <button wire:click="selectSetting('{{ $key }}')" class="settings-nav-item {{ $activeSetting === $key ? 'is-active' : '' }}">
                     <flux:icon name="{{ $section['icon'] }}" variant="outline" class="settings-nav-icon" />
@@ -466,20 +568,33 @@
                 @endforeach
             </nav>
 
-            <div class="settings-content">
+            <div class="settings-content {{ $activeSetting === 'storage' ? 'is-storage-setting' : '' }}">
                 @if($activeSetting === 'profile')
                 <div class="settings-section-heading">
                     <flux:heading size="xl">Profile & SMS Identity</flux:heading>
                     <flux:subheading>How your identity appears when you send a normal SMS.</flux:subheading>
                 </div>
                 <div class="settings-profile-card">
+                    @if($profilePhotoUrl)
+                    <img src="{{ $profilePhotoUrl }}" alt="{{ $displayName }}" class="settings-profile-avatar" />
+                    @else
                     <flux:avatar initials="A" color="green" size="lg" />
+                    @endif
                     <div>
                         <flux:heading size="lg">{{ $displayName }}</flux:heading>
                         <flux:text>{{ $phoneNumber }}</flux:text>
                     </div>
                     <flux:badge color="blue">Verified</flux:badge>
                 </div>
+                <flux:field>
+                    <flux:label>Profile photo</flux:label>
+                    <input type="file" accept="image/png,image/jpeg,image/webp" wire:model="profilePhoto" class="settings-file-input" />
+                    @error('profilePhoto')<flux:error>{{ $message }}</flux:error>@enderror
+                </flux:field>
+                @if($profilePhotoUrl)
+                <flux:button type="button" wire:click="removeProfilePhoto" variant="ghost" icon="trash">Remove photo</flux:button>
+                @endif
+                <flux:button type="button" wire:click="uploadProfilePhoto" variant="primary" icon="check">Upload photo</flux:button>
                 <flux:field>
                     <flux:label>Display name</flux:label>
                     <flux:input wire:model="displayName" />
@@ -539,22 +654,184 @@
                     <flux:heading size="xl">Privacy & Blocked Contacts</flux:heading>
                     <flux:subheading>Keep your SMS identity and conversations under your control.</flux:subheading>
                 </div>
+                <flux:field>
+                    <flux:label>Last seen</flux:label>
+                    <select wire:model="lastSeenVisibility" class="settings-select">
+                        <option>Everyone</option>
+                        <option>My contacts</option>
+                        <option>My contacts except...</option>
+                        <option>Nobody</option>
+                    </select>
+                </flux:field>
+                <flux:field>
+                    <flux:label>Profile photo</flux:label>
+                    <select wire:model="profilePictureVisibility" class="settings-select">
+                        <option>Everyone</option>
+                        <option>My contacts</option>
+                        <option>Nobody</option>
+                    </select>
+                </flux:field>
+                <flux:field>
+                    <flux:label>Status visibility</flux:label>
+                    <select wire:model="statusVisibility" class="settings-select">
+                        <option>Everyone</option>
+                        <option>My contacts</option>
+                        <option>Nobody</option>
+                    </select>
+                </flux:field>
                 <flux:checkbox label="Hide message content in desktop notifications" checked />
                 <flux:checkbox label="Require confirmation before sending to a new number" checked />
                 <div class="settings-info-card"><flux:icon.lock-closed variant="outline" /><span>No internet account is required. Your privacy settings apply to this device and its normal SMS workflow.</span></div>
+                <flux:button type="button" wire:click="savePrivacySettings" variant="primary" icon="check">Save privacy</flux:button>
                 <flux:button variant="danger" icon="no-symbol">Manage blocked contacts</flux:button>
                 @else
-                <div class="settings-section-heading">
-                    <flux:heading size="xl">SMS Data, Queue & Storage</flux:heading>
-                    <flux:subheading>Review local queue health and manage stored conversation data.</flux:subheading>
+                <div class="storage-page">
+                    @if(! $showStorageDetails && ! $showNetworkDetails && ! $showProxyDetails)
+                    <div class="storage-setting-list">
+                        <button type="button" class="storage-setting-row storage-setting-link" wire:click="openStorageDetails">
+                            <flux:icon.folder variant="outline" />
+                            <span class="storage-setting-copy"><strong>Manage storage</strong><small>{{ number_format($this->storageSummary['message_count']) }} messages · {{ $this->formatStorageBytes($this->storageSummary['storage_bytes']) }} voice media</small></span>
+                            <flux:icon.chevron-right variant="outline" />
+                        </button>
+                        <button type="button" class="storage-setting-row storage-setting-link" wire:click="openNetworkDetails">
+                            <flux:icon.chart-bar variant="outline" />
+                            <span class="storage-setting-copy"><strong>Network usage</strong><small>View AirText data sent and received this month.</small></span>
+                            <flux:icon.chevron-right variant="outline" />
+                        </button>
+                        <label class="storage-setting-row storage-switch-row" for="use-less-data-calls">
+                            <flux:icon.phone variant="outline" />
+                            <span class="storage-setting-copy"><strong>Use less data for calls</strong><small>Preference saved to your AirText account</small></span>
+                            <input id="use-less-data-calls" type="checkbox" class="storage-switch" wire:model="useLessDataForCalls" wire:change="saveStorageSettings" />
+                        </label>
+                        <button type="button" class="storage-setting-row storage-setting-link" wire:click="openProxyDetails">
+                            <flux:icon.shield-exclamation variant="outline" />
+                            <span class="storage-setting-copy"><strong>Proxy</strong><small>View browser proxy status and connection.</small></span>
+                            <flux:icon.chevron-right variant="outline" />
+                        </button>
+                    </div>
+
+                    <div class="storage-setting-list">
+                        <label class="storage-setting-row" for="media-upload-quality">
+                            <flux:icon.photo variant="outline" />
+                            <span class="storage-setting-copy"><strong>Media upload quality</strong><small>Choose the default quality</small></span>
+                            <select id="media-upload-quality" class="storage-setting-select" wire:model="uploadQuality" wire:change="saveStorageSettings">
+                                <option value="hd">HD quality</option>
+                                <option value="standard">Standard quality</option>
+                            </select>
+                        </label>
+                        <label class="storage-setting-row" for="auto-download-quality">
+                            <span class="storage-setting-icon-spacer"></span>
+                            <span class="storage-setting-copy"><strong>Auto-download quality</strong><small>Choose the default quality</small></span>
+                            <select id="auto-download-quality" class="storage-setting-select" wire:model="autoDownloadQuality" wire:change="saveStorageSettings">
+                                <option value="auto">Auto</option>
+                                <option value="high">High quality</option>
+                            </select>
+                        </label>
+                    </div>
+
+                    <section class="storage-auto-download" aria-labelledby="storage-download-heading">
+                        <h2 id="storage-download-heading">Media auto-download</h2>
+                        <p class="storage-setting-note">Voice messages are downloaded when you play them in this web app.</p>
+                        <label class="storage-setting-row" for="mobile-data-downloads">
+                            <span class="storage-setting-icon-spacer"></span>
+                            <span class="storage-setting-copy"><strong>When using mobile data</strong></span>
+                            <select id="mobile-data-downloads" class="storage-setting-select" wire:model="mobileDataDownloads" wire:change="saveStorageSettings">
+                                <option value="none">No media</option>
+                                <option value="photos">Photos</option>
+                                <option value="all">All media</option>
+                            </select>
+                        </label>
+                        <label class="storage-setting-row" for="wifi-downloads">
+                            <span class="storage-setting-icon-spacer"></span>
+                            <span class="storage-setting-copy"><strong>When connected on Wi-Fi</strong></span>
+                            <select id="wifi-downloads" class="storage-setting-select" wire:model="wifiDownloads" wire:change="saveStorageSettings">
+                                <option value="none">No media</option>
+                                <option value="photos">Photos</option>
+                                <option value="all">All media</option>
+                            </select>
+                        </label>
+                        <label class="storage-setting-row" for="roaming-downloads">
+                            <span class="storage-setting-icon-spacer"></span>
+                            <span class="storage-setting-copy"><strong>When roaming</strong></span>
+                            <select id="roaming-downloads" class="storage-setting-select" wire:model="roamingDownloads" wire:change="saveStorageSettings">
+                                <option value="none">No media</option>
+                                <option value="photos">Photos</option>
+                                <option value="all">All media</option>
+                            </select>
+                        </label>
+                    </section>
+
+                    <section class="storage-auto-download" aria-labelledby="storage-display-heading">
+                        <h2 id="storage-display-heading">Media display</h2>
+                        <div class="storage-setting-row storage-device-row" data-device-display aria-live="polite">
+                            <flux:icon.device-phone-mobile variant="outline" />
+                            <span class="storage-setting-copy">
+                                <strong data-device-name>Detecting this device...</strong>
+                                <small><span data-device-os>Reading operating system</span> · <span data-device-browser>Reading browser</span></small>
+                                <small data-device-note>Device details are detected locally by this browser.</small>
+                            </span>
+                        </div>
+                    </section>
+                    @elseif($showNetworkDetails)
+                    <section class="storage-detail-page" aria-labelledby="network-usage-heading">
+                        <div class="storage-detail-intro">
+                            <flux:icon.chart-bar variant="outline" />
+                            <div>
+                                <h2 id="network-usage-heading">Network usage</h2>
+                                <p>AirText app traffic · {{ $this->networkUsageSummary['period_label'] }}</p>
+                            </div>
+                        </div>
+                        <div class="network-usage-stats">
+                            <div><span>Sent</span><strong>{{ $this->formatStorageBytes($this->networkUsageSummary['uploaded_bytes']) }}</strong></div>
+                            <div><span>Received</span><strong>{{ $this->formatStorageBytes($this->networkUsageSummary['downloaded_bytes']) }}</strong></div>
+                            <div><span>Requests</span><strong>{{ number_format($this->networkUsageSummary['request_count']) }}</strong></div>
+                        </div>
+                        <p class="storage-safety-note">Counts API and signed-in web request payloads recorded by AirText. They do not include mobile carrier overhead, other apps, browser assets served outside Laravel, or device background traffic.</p>
+                    </section>
+                    @elseif($showProxyDetails)
+                    <section class="storage-detail-page" aria-labelledby="proxy-heading" x-data="{ status: 'Not checked', async check() { this.status = 'Checking connection...'; try { const response = await fetch('/up', { cache: 'no-store' }); this.status = response.ok ? 'AirText is reachable through this browser connection.' : 'AirText returned a connection error.'; } catch (error) { this.status = 'AirText could not be reached through this browser connection.'; } } }">
+                        <div class="storage-detail-intro">
+                            <flux:icon.shield-check variant="outline" />
+                            <div>
+                                <h2 id="proxy-heading">Proxy</h2>
+                                <p>Browser network settings</p>
+                            </div>
+                        </div>
+                        <div class="proxy-settings-note">
+                            <strong>Proxy is controlled by your browser or device.</strong>
+                            <p>A website cannot change your device-wide proxy or route other apps through one. Configure a proxy in your operating system or browser; AirText will use the browser's existing network route.</p>
+                        </div>
+                        <button type="button" class="proxy-check-button" x-on:click="check()">Check connection</button>
+                        <p class="proxy-check-status" role="status" x-text="status">Not checked</p>
+                    </section>
+                    @elseif($showStorageDetails)
+                    <section id="manage-storage" class="storage-management-section" aria-labelledby="storage-sms-heading">
+                        <div class="storage-management-header">
+                            <div>
+                                <h2 id="storage-sms-heading">Manage storage</h2>
+                                <p>{{ number_format($this->storageSummary['conversation_count']) }} conversations · {{ number_format($this->storageSummary['message_count']) }} messages</p>
+                            </div>
+                            <flux:button type="button" wire:click="clearAllStoredSmsMessages" wire:confirm="Permanently delete all messages in your SMS conversations? This cannot be undone." variant="danger" icon="trash" :disabled="$this->storageSummary['sms_message_count'] === 0">
+                                Clear all SMS messages
+                            </flux:button>
+                        </div>
+                        <div class="storage-conversation-list">
+                            @forelse($this->storedSmsConversations as $storedConversation)
+                            <div class="storage-conversation-row">
+                                <div>
+                                    <strong>{{ $storedConversation['name'] }}</strong>
+                                    <small>{{ number_format($storedConversation['message_count']) }} messages</small>
+                                </div>
+                                <flux:button type="button" wire:click="clearStoredSmsConversation({{ $storedConversation['id'] }})" wire:confirm="Permanently delete all messages in this SMS conversation? This cannot be undone." variant="ghost" icon="trash" :disabled="$storedConversation['message_count'] === 0" aria-label="Clear messages for {{ $storedConversation['name'] }}" />
+                            </div>
+                            @empty
+                            <p class="storage-empty-state">No SMS conversations are stored for this account.</p>
+                            @endforelse
+                        </div>
+                        <p class="storage-safety-note">Shared AirText conversations are excluded so clearing storage does not delete messages for another participant.</p>
+                    </section>
+                    @endif
                 </div>
-                <div class="storage-grid">
-                    <div><strong>0</strong><span>Queued messages</span></div>
-                    <div><strong>3</strong><span>Conversations</span></div>
-                    <div><strong>24 KB</strong><span>Local attachments</span></div>
-                </div>
-                <flux:button variant="outline" icon="arrow-path">Retry queued messages</flux:button>
-                <flux:button variant="danger" icon="trash">Clear local message cache</flux:button>
                 @endif
             </div>
         </div>

@@ -5,7 +5,9 @@
         <flux:text>Tools and services for reliable business messaging.</flux:text>
     </div>
     <div class="shop-wallet">
-        <span class="shop-wallet-icon"><flux:icon.wallet variant="outline" /></span>
+        <span class="shop-wallet-icon">
+            <flux:icon.wallet variant="outline" />
+        </span>
         <div><small>Wallet</small><strong>Not connected</strong></div>
         <flux:button wire:click="topUpCredits" variant="primary" icon="plus">Top up credits</flux:button>
     </div>

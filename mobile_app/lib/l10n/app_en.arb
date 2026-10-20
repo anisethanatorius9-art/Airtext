@@ -1,0 +1,10 @@
+{
+  "@@locale": "en",
+  "welcomeTitle": "Welcome to AirText",
+  "welcomeSubtitle": "Secure messaging made beautifully human.",
+  "welcomePromise": "Private, elegant, and ready on every device.",
+  "preferredLanguage": "Preferred language",
+  "agreeAndContinue": "Agree and continue",
+  "selectLanguage": "Select language",
+  "searchLanguage": "Search language"
+}

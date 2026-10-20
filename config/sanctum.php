@@ -9,6 +9,6 @@ return [
         (string) Sanctum::currentApplicationUrlWithPort(),
     ))),
     'guard' => ['web'],
-    'expiration' => env('SANCTUM_EXPIRATION', 10080),
+    'expiration' => env('SANCTUM_EXPIRATION'),
     'token_prefix' => env('SANCTUM_TOKEN_PREFIX', ''),
 ];
